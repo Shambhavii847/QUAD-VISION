@@ -37,6 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
   // Role-segmented navigation lists
   const studentItems = [
     { to: '/student', label: 'My Academics', icon: UserCheck, visible: true },
+    { to: '/calendar', label: 'My Calendar', icon: CalendarDays, visible: true },
     { to: '/lesson-plan', label: 'Learning Library', icon: BookOpen, visible: true },
     { to: '/exams', label: 'Exam Schedule', icon: GraduationCap, visible: true },
   ];

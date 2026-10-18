@@ -31,9 +31,18 @@ import {
   Building2,
   Lock,
 } from 'lucide-react';
+import { StudentCalendarView } from './StudentCalendarView';
 
 export const CalendarTimetable: React.FC = () => {
-  const { currentUser, canManageAdmin, isCampusManager, isAdmin } = useAuth();
+  const { currentUser, canManageAdmin, isCampusManager, isAdmin, isStudent } = useAuth();
+
+  // If the logged-in user is a student, render the Student Calendar directly with read-only access
+  if (isStudent || currentUser?.role === 'student') {
+    return <StudentCalendarView />;
+  }
+
+  // Non-student roles (Admins, Campus Managers, Faculty) can toggle between Student Calendar and Management
+  const [viewTab, setViewTab] = useState<'student_calendar' | 'timetable_admin'>('student_calendar');
   const branches = getBranches();
 
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
@@ -196,14 +205,52 @@ export const CalendarTimetable: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Filter and Controls Bar */}
-      <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#EFE8DC] shadow-[0_2px_12px_rgba(28,25,23,0.03)]">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-[11px] px-3 py-0.5 rounded-full bg-[#FEF9E7] text-[#614800] border border-[#FBE69B] font-medium">
-                Academic Timetable
-              </span>
+      {/* Calendar Mode Switcher for Admins / Managers / Faculty */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 px-4 rounded-2xl bg-white border border-[#EFE8DC] shadow-2xs">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-[#1C1917]">Calendar Mode:</span>
+          <div className="flex items-center p-1 rounded-xl bg-[#FAF7F0] border border-[#EFE8DC] text-xs">
+            <button
+              type="button"
+              onClick={() => setViewTab('student_calendar')}
+              className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                viewTab === 'student_calendar'
+                  ? 'bg-[#1C1917] text-white shadow-2xs'
+                  : 'text-[#71695F] hover:text-[#1C1917]'
+              }`}
+            >
+              Student Calendar View
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewTab('timetable_admin')}
+              className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                viewTab === 'timetable_admin'
+                  ? 'bg-[#1C1917] text-white shadow-2xs'
+                  : 'text-[#71695F] hover:text-[#1C1917]'
+              }`}
+            >
+              Timetable & Rules Management
+            </button>
+          </div>
+        </div>
+        <span className="text-xs text-[#8C8275]">
+          Viewing as {currentUser?.role?.replace('_', ' ')}
+        </span>
+      </div>
+
+      {viewTab === 'student_calendar' ? (
+        <StudentCalendarView />
+      ) : (
+        <>
+          {/* Top Filter and Controls Bar */}
+          <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#EFE8DC] shadow-[0_2px_12px_rgba(28,25,23,0.03)]">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[11px] px-3 py-0.5 rounded-full bg-[#FEF9E7] text-[#614800] border border-[#FBE69B] font-medium">
+                    Academic Timetable
+                  </span>
               <span className="text-xs text-[#71695F]">
                 • {currentBranchRecord.name} ({currentBranchRecord.university_short_name})
               </span>
@@ -662,6 +709,8 @@ export const CalendarTimetable: React.FC = () => {
           </div>
         </form>
       </Modal>
+        </>
+      )}
     </div>
   );
 };

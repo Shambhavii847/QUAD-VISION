@@ -154,7 +154,7 @@ const AppRoutes: React.FC = () => {
         element={
           currentUser ? (
             <AppLayout>
-              <RequireRole allowedRoles={['faculty', 'campus_manager', 'admin']} requiredLabel="Schedule">
+              <RequireRole allowedRoles={['student', 'faculty', 'campus_manager', 'admin']} requiredLabel="Schedule">
                 <CalendarTimetable />
               </RequireRole>
             </AppLayout>
