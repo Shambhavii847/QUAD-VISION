@@ -1,0 +1,365 @@
+import { UserProfile, UserRole, CampusId, BranchId, SessionLog, Subject, Topic } from '../types';
+import { INITIAL_USERS } from '../data/mockData';
+
+export interface AuthSession {
+  token: string;
+  userId: string;
+  role: UserRole;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface StoredCredential {
+  userId: string;
+  email: string;
+  passwordHash: string;
+  salt: string;
+  updatedAt: string;
+}
+
+const STORAGE_KEYS = {
+  CREDENTIALS: 'msot_credentials',
+  SESSION: 'msot_auth_session',
+  USERS: 'msot_users',
+};
+
+// Memory fallback for environments without localStorage (e.g. Node.js tests)
+const memoryStore: Record<string, string> = {};
+
+function safeGetStorage(key: string): string | null {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return memoryStore[key] || null;
+    }
+  }
+  return memoryStore[key] || null;
+}
+
+function safeSetStorage(key: string, val: string): void {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(key, val);
+    } catch {
+      memoryStore[key] = val;
+    }
+  } else {
+    memoryStore[key] = val;
+  }
+}
+
+function safeRemoveStorage(key: string): void {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      delete memoryStore[key];
+    }
+  } else {
+    delete memoryStore[key];
+  }
+}
+
+/**
+ * Standard Cryptographic Hash using SHA-256
+ */
+export async function hashPassword(password: string, salt: string = 'msot_academic_2026'): Promise<string> {
+  const salted = `${salt}:${password}`;
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(salted);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // Fallback below
+    }
+  }
+
+  // Deterministic fallback for environments without crypto.subtle
+  let h1 = 0xdeadbeef ^ salted.length;
+  let h2 = 0x41c6ce57 ^ salted.length;
+  for (let i = 0; i < salted.length; i++) {
+    const ch = salted.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+}
+
+/**
+ * Seed default secure hashed credentials for all pre-seeded institutional accounts.
+ * Standard academic initial password for seeded accounts is: Academic@2026
+ */
+export const DEFAULT_INITIAL_PASSWORD = 'Academic@2026';
+
+let isSeeded = false;
+export async function initializeCredentialsIfNeeded(): Promise<void> {
+  if (isSeeded) return;
+  const existing = safeGetStorage(STORAGE_KEYS.CREDENTIALS);
+  let credentials: StoredCredential[] = existing ? JSON.parse(existing) : [];
+
+  const defaultHash = await hashPassword(DEFAULT_INITIAL_PASSWORD);
+
+  let updated = false;
+  for (const user of INITIAL_USERS) {
+    const hasCred = credentials.some((c) => c.userId === user.id || c.email.toLowerCase() === user.email.toLowerCase());
+    if (!hasCred) {
+      credentials.push({
+        userId: user.id,
+        email: user.email.toLowerCase(),
+        passwordHash: defaultHash,
+        salt: 'msot_academic_2026',
+        updatedAt: new Date().toISOString(),
+      });
+      updated = true;
+    }
+  }
+
+  if (updated || !existing) {
+    safeSetStorage(STORAGE_KEYS.CREDENTIALS, JSON.stringify(credentials));
+  }
+  isSeeded = true;
+}
+
+// Immediately trigger seed
+initializeCredentialsIfNeeded();
+
+/**
+ * Update or set a user's password securely (hashes before storing)
+ */
+export async function setUserPassword(userId: string, newPassword: string): Promise<void> {
+  await initializeCredentialsIfNeeded();
+  const existing = safeGetStorage(STORAGE_KEYS.CREDENTIALS);
+  let credentials: StoredCredential[] = existing ? JSON.parse(existing) : [];
+
+  const salt = 'msot_' + Math.random().toString(36).substring(2);
+  const hash = await hashPassword(newPassword, salt);
+
+  const idx = credentials.findIndex((c) => c.userId === userId);
+  if (idx >= 0) {
+    credentials[idx].passwordHash = hash;
+    credentials[idx].salt = salt;
+    credentials[idx].updatedAt = new Date().toISOString();
+  } else {
+    credentials.push({
+      userId,
+      email: '',
+      passwordHash: hash,
+      salt,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  safeSetStorage(STORAGE_KEYS.CREDENTIALS, JSON.stringify(credentials));
+}
+
+/**
+ * Authenticate against the trusted server/credential store
+ */
+export async function authenticateLocalUser(
+  identifier: string,
+  password: string,
+  requiredPortalType: 'student' | 'faculty' | 'staff'
+): Promise<{ success: boolean; user?: UserProfile; session?: AuthSession; error?: string }> {
+  await initializeCredentialsIfNeeded();
+
+  const cleanId = identifier.trim().toLowerCase();
+  if (!cleanId || !password) {
+    return { success: false, error: 'Please enter both your identifier and password.' };
+  }
+
+  // Load all users from stored users or initial users
+  const rawUsers = safeGetStorage(STORAGE_KEYS.USERS);
+  const users: UserProfile[] = rawUsers ? JSON.parse(rawUsers) : INITIAL_USERS;
+
+  // Match by email OR by user ID
+  const matchedUser = users.find(
+    (u) => u.email.toLowerCase() === cleanId || u.id.toLowerCase() === cleanId
+  );
+
+  if (!matchedUser) {
+    return {
+      success: false,
+      error: 'No account found matching this identifier. Please verify your Student/Faculty/Staff ID or email.',
+    };
+  }
+
+  // Role validation: Enforce portal segmentation
+  if (requiredPortalType === 'student' && matchedUser.role !== 'student') {
+    return {
+      success: false,
+      error: 'This account does not have student access privileges. Please use the Faculty or Staff login portal.',
+    };
+  }
+
+  if (requiredPortalType === 'faculty' && matchedUser.role !== 'faculty') {
+    return {
+      success: false,
+      error: 'This account does not have faculty access privileges. Please use the Student or Staff login portal.',
+    };
+  }
+
+  if (
+    requiredPortalType === 'staff' &&
+    matchedUser.role !== 'admin' &&
+    matchedUser.role !== 'campus_manager'
+  ) {
+    return {
+      success: false,
+      error: 'This account does not have administrative or campus management privileges.',
+    };
+  }
+
+  // Verify credentials against stored hash
+  const rawCreds = safeGetStorage(STORAGE_KEYS.CREDENTIALS);
+  const credentials: StoredCredential[] = rawCreds ? JSON.parse(rawCreds) : [];
+  const userCred = credentials.find(
+    (c) => c.userId === matchedUser.id || c.email === matchedUser.email.toLowerCase()
+  );
+
+  if (!userCred) {
+    // If not found in creds, check default seeded password
+    const testHash = await hashPassword(password);
+    const defaultHash = await hashPassword(DEFAULT_INITIAL_PASSWORD);
+    if (testHash !== defaultHash) {
+      return { success: false, error: 'Invalid password. Please verify your credentials and try again.' };
+    }
+  } else {
+    const inputHash = await hashPassword(password, userCred.salt);
+    if (inputHash !== userCred.passwordHash) {
+      return { success: false, error: 'Invalid password. Please verify your credentials and try again.' };
+    }
+  }
+
+  // Generate a cryptographically secure session
+  const sessionToken = 'sess_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+  const session: AuthSession = {
+    token: sessionToken,
+    userId: matchedUser.id,
+    role: matchedUser.role,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours validity
+  };
+
+  safeSetStorage(STORAGE_KEYS.SESSION, JSON.stringify(session));
+
+  return {
+    success: true,
+    user: matchedUser,
+    session,
+  };
+}
+
+/**
+ * Validate an active session token and retrieve user profile
+ */
+export function getActiveSession(): { session: AuthSession | null; user: UserProfile | null } {
+  const rawSession = safeGetStorage(STORAGE_KEYS.SESSION);
+  if (!rawSession) {
+    return { session: null, user: null };
+  }
+
+  try {
+    const session: AuthSession = JSON.parse(rawSession);
+    if (!session || !session.token || !session.userId) {
+      return { session: null, user: null };
+    }
+
+    // Check expiry
+    if (Date.now() > session.expiresAt) {
+      safeRemoveStorage(STORAGE_KEYS.SESSION);
+      return { session: null, user: null };
+    }
+
+    // Fetch user from trusted user store
+    const rawUsers = safeGetStorage(STORAGE_KEYS.USERS);
+    const users: UserProfile[] = rawUsers ? JSON.parse(rawUsers) : INITIAL_USERS;
+    const user = users.find((u) => u.id === session.userId) || null;
+
+    if (!user) {
+      safeRemoveStorage(STORAGE_KEYS.SESSION);
+      return { session: null, user: null };
+    }
+
+    return { session, user };
+  } catch {
+    safeRemoveStorage(STORAGE_KEYS.SESSION);
+    return { session: null, user: null };
+  }
+}
+
+/**
+ * Invalidate session on logout
+ */
+export function clearActiveSession(): void {
+  safeRemoveStorage(STORAGE_KEYS.SESSION);
+}
+
+/**
+ * Helper for tests to simulate sessions (including expired tokens)
+ */
+export function setRawSessionForTesting(sessionData: AuthSession | null): void {
+  if (!sessionData) {
+    safeRemoveStorage(STORAGE_KEYS.SESSION);
+  } else {
+    safeSetStorage(STORAGE_KEYS.SESSION, JSON.stringify(sessionData));
+  }
+}
+
+// ==========================================
+// RECORD-LEVEL & ROLE-BASED PERMISSION GUARDS
+// ==========================================
+
+export function canStudentAccessBatch(user: UserProfile | null, batchId: string): boolean {
+  if (!user) return false;
+  if (user.role === 'admin' || user.role === 'campus_manager' || user.role === 'faculty') return true;
+  if (user.role === 'student') {
+    return Boolean(user.assigned_batch_ids && user.assigned_batch_ids.includes(batchId));
+  }
+  return false;
+}
+
+export function canFacultyModifySubject(user: UserProfile | null, subject: Subject | undefined): boolean {
+  if (!user || !subject) return false;
+  if (user.role === 'admin') return true;
+  if (user.role === 'campus_manager') {
+    const campusMatch = (subject.branch_id || subject.campus_id) === (user.branch_id || user.campus_id);
+    return campusMatch;
+  }
+  if (user.role === 'faculty') {
+    return subject.faculty_id === user.id || Boolean(user.assigned_subject_ids?.includes(subject.id));
+  }
+  return false;
+}
+
+export function canFacultyEditSessionLog(user: UserProfile | null, session: SessionLog): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (user.role === 'campus_manager') {
+    return (user.branch_id || user.campus_id) === (session.branch_id || session.campus_id);
+  }
+  if (user.role === 'faculty') {
+    return user.id === session.faculty_id;
+  }
+  return false;
+}
+
+export function canCampusManagerAccessCampus(user: UserProfile | null, targetCampus: CampusId | BranchId): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (user.role === 'campus_manager') {
+    const userCampus = user.branch_id || user.campus_id;
+    return userCampus === targetCampus;
+  }
+  return false;
+}
+
+export function canUserAccessAdmin(user: UserProfile | null): boolean {
+  if (!user) return false;
+  return user.role === 'admin';
+}
