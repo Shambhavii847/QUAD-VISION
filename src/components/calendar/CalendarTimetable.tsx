@@ -32,6 +32,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { StudentCalendarView } from './StudentCalendarView';
+import { RequestExtraClassModal } from '../faculty/RequestExtraClassModal';
 
 export const CalendarTimetable: React.FC = () => {
   const { currentUser, canManageAdmin, isCampusManager, isAdmin, isStudent } = useAuth();
@@ -43,6 +44,7 @@ export const CalendarTimetable: React.FC = () => {
 
   // Non-student roles (Admins, Campus Managers, Faculty) can toggle between Student Calendar and Management
   const [viewTab, setViewTab] = useState<'student_calendar' | 'timetable_admin'>('student_calendar');
+  const [isExtraClassModalOpen, setIsExtraClassModalOpen] = useState(false);
   const branches = getBranches();
 
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
@@ -234,9 +236,21 @@ export const CalendarTimetable: React.FC = () => {
             </button>
           </div>
         </div>
-        <span className="text-xs text-[#8C8275]">
-          Viewing as {currentUser?.role?.replace('_', ' ')}
-        </span>
+        <div className="flex items-center gap-3">
+          {(currentUser?.role === 'faculty' || currentUser?.role === 'admin') && (
+            <button
+              type="button"
+              onClick={() => setIsExtraClassModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-[#FAF7F0] hover:bg-[#EFE8DC] text-[#1C1917] font-bold text-xs border border-[#EFE8DC] transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#B08800]" />
+              <span>Request Extra Class</span>
+            </button>
+          )}
+          <span className="text-xs text-[#8C8275]">
+            Viewing as {currentUser?.role?.replace('_', ' ')}
+          </span>
+        </div>
       </div>
 
       {viewTab === 'student_calendar' ? (
@@ -711,6 +725,12 @@ export const CalendarTimetable: React.FC = () => {
       </Modal>
         </>
       )}
+
+      {/* Request Extra Class Modal */}
+      <RequestExtraClassModal
+        isOpen={isExtraClassModalOpen}
+        onClose={() => setIsExtraClassModalOpen(false)}
+      />
     </div>
   );
 };

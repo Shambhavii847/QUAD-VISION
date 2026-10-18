@@ -233,11 +233,87 @@ export interface ExamReadinessCalculation {
 export interface AuditTrailEntry {
   id: string;
   branch_id?: BranchId;
-  entity_type: 'topic' | 'unit' | 'subject' | 'session_log' | 'timetable' | 'calendar' | 'branch';
+  entity_type: 'topic' | 'unit' | 'subject' | 'session_log' | 'timetable' | 'calendar' | 'branch' | 'extra_class';
   entity_id: string;
   action: 'create' | 'update' | 'delete' | 'recalculate';
   performed_by_id: string;
   performed_by_name: string;
   details: string;
   timestamp: string;
+}
+
+export type ExtraClassRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'changes_requested'
+  | 'withdrawn';
+
+export interface ExtraClassRequestHistoryEntry {
+  id: string;
+  action: string;
+  performed_by_id: string;
+  performed_by_name: string;
+  timestamp: string;
+  notes?: string;
+  status?: ExtraClassRequestStatus;
+}
+
+export interface ExtraClassRequest {
+  id: string;
+  faculty_id: string;
+  faculty_name: string;
+  faculty_email?: string;
+  branch_id: BranchId;
+  academic_track: AcademicTrackId;
+  batch_id: string;
+  batch_name?: string;
+  subject_id: string;
+  subject_name?: string;
+  subject_code?: string;
+  date: string; // YYYY-MM-DD
+  start_time: string; // HH:MM (e.g. "14:00")
+  end_time: string; // HH:MM (e.g. "15:30")
+  duration_hours: number;
+  room?: string;
+  topic_ids?: string[];
+  topic_titles?: string[];
+  reason: string;
+  notes?: string;
+  status: ExtraClassRequestStatus;
+  rejection_reason?: string;
+  change_request_notes?: string;
+  override_reason?: string;
+  reviewed_by_id?: string;
+  reviewed_by_name?: string;
+  reviewed_at?: string;
+  created_at: string;
+  updated_at: string;
+  history: ExtraClassRequestHistoryEntry[];
+}
+
+export interface ApprovedExtraClass {
+  id: string;
+  request_id: string;
+  subject_id: string;
+  subject_name: string;
+  subject_code: string;
+  batch_id: string;
+  batch_name: string;
+  branch_id: BranchId;
+  academic_track: AcademicTrackId;
+  date: string; // YYYY-MM-DD
+  start_time: string; // HH:MM
+  end_time: string; // HH:MM
+  duration_hours: number;
+  room: string;
+  faculty_id: string;
+  faculty_name: string;
+  topic_ids?: string[];
+  topic_titles?: string[];
+  reason: string;
+  approved_by_id: string;
+  approved_by_name: string;
+  approved_at: string;
+  override_reason?: string;
 }

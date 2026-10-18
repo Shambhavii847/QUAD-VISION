@@ -8,9 +8,12 @@ import {
   getTopics,
   getUsers,
   getMissedSessions,
+  getExtraClassRequests,
 } from '../../services/storage';
 import { isSupabaseConfigured } from '../../services/supabaseClient';
 import { SessionLoggingModal } from './SessionLoggingModal';
+import { RequestExtraClassModal } from './RequestExtraClassModal';
+import { MyExtraClassRequests } from './MyExtraClassRequests';
 import { TimetableEntry, SessionLog } from '../../types';
 import { calculateHoursInScope, calculateCoveredHours, calculateCoveragePercentage } from '../../utils/calculations';
 import {
@@ -57,14 +60,26 @@ export const FacultyDashboard: React.FC = () => {
   const [isLoggingModalOpen, setIsLoggingModalOpen] = useState(false);
   const [selectedSlotForLog, setSelectedSlotForLog] = useState<TimetableEntry | null>(null);
   const [inspectingLog, setInspectingLog] = useState<SessionLog | null>(null);
+  const [isExtraClassModalOpen, setIsExtraClassModalOpen] = useState(false);
 
   // Filters state
-  const [activeTab, setActiveTab] = useState<'logs' | 'schedule'>(isAdministrativeRole ? 'logs' : 'schedule');
+  const [activeTab, setActiveTab] = useState<'logs' | 'schedule' | 'extra_classes'>(
+    isAdministrativeRole ? 'logs' : 'schedule'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [subjectFilter, setSubjectFilter] = useState<string>('all');
   const [facultyFilter, setFacultyFilter] = useState<string>('all');
   const [batchFilter, setBatchFilter] = useState<string>('all');
+
+  const allExtraClassRequests = getExtraClassRequests();
+  const myExtraClassRequests = useMemo(() => {
+    return allExtraClassRequests.filter((r) => r.faculty_id === currentUser?.id);
+  }, [allExtraClassRequests, currentUser]);
+
+  const myPendingRequestsCount = useMemo(() => {
+    return myExtraClassRequests.filter((r) => r.status === 'pending').length;
+  }, [myExtraClassRequests]);
 
   // Simulation date (reference academic calendar date)
   const currentDayOfWeek = 5; // Friday
@@ -237,6 +252,14 @@ export const FacultyDashboard: React.FC = () => {
 
         <div className="flex items-center gap-2.5 shrink-0">
           <button
+            onClick={() => setIsExtraClassModalOpen(true)}
+            className="px-4 py-2.5 rounded-2xl bg-[#FAF7F0] hover:bg-[#EFE8DC] text-[#1C1917] font-bold text-xs border border-[#EFE8DC] transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
+          >
+            <Calendar className="w-4 h-4 text-[#B08800]" />
+            <span>Request Extra Class</span>
+          </button>
+
+          <button
             onClick={() => handleOpenLogModal()}
             className="px-4 py-2.5 rounded-2xl bg-[#1C1917] hover:bg-[#2C2825] text-white font-medium text-xs shadow-xs transition-all flex items-center gap-2 cursor-pointer"
           >
@@ -293,8 +316,8 @@ export const FacultyDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Tabs: Class Logs vs Teaching Schedule */}
-      <div className="flex items-center gap-2 border-b border-[#EFE8DC] pb-2">
+      {/* Tabs: Class Logs vs Teaching Schedule vs Extra Classes */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#EFE8DC] pb-2">
         <button
           onClick={() => setActiveTab('logs')}
           className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
@@ -314,6 +337,22 @@ export const FacultyDashboard: React.FC = () => {
           }`}
         >
           Teaching Schedule & Timetable ({accessibleTimetable.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('extra_classes')}
+          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'extra_classes'
+              ? 'bg-[#1C1917] text-white shadow-xs'
+              : 'text-[#71695F] hover:text-[#1C1917] hover:bg-white'
+          }`}
+        >
+          <Calendar className="w-3.5 h-3.5 text-[#FBE69B]" />
+          <span>My Extra Class Requests ({myExtraClassRequests.length})</span>
+          {myPendingRequestsCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-[#FEF9E7] text-[#614800] text-[10px] font-extrabold border border-[#FBE69B]">
+              {myPendingRequestsCount} Pending
+            </span>
+          )}
         </button>
       </div>
 
@@ -665,6 +704,11 @@ export const FacultyDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* Extra Class Requests Tab Content */}
+      {activeTab === 'extra_classes' && (
+        <MyExtraClassRequests onNewRequestClick={() => setIsExtraClassModalOpen(true)} />
+      )}
+
       {/* Record Inspection Modal */}
       {inspectingLog && (
         <Modal
@@ -791,6 +835,12 @@ export const FacultyDashboard: React.FC = () => {
         isOpen={isLoggingModalOpen}
         onClose={() => setIsLoggingModalOpen(false)}
         preselectedSlot={selectedSlotForLog}
+      />
+
+      {/* Request Extra Class Modal */}
+      <RequestExtraClassModal
+        isOpen={isExtraClassModalOpen}
+        onClose={() => setIsExtraClassModalOpen(false)}
       />
     </div>
   );

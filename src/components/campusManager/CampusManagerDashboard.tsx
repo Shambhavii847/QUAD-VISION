@@ -10,10 +10,12 @@ import {
   getTimetable,
   getMissedSessions,
   getUsers,
+  getExtraClassRequests,
   sendFacultyReminder,
   escalateMissedSession,
   resolveMissedSession,
 } from '../../services/storage';
+import { ExtraClassApprovalSection } from './ExtraClassApprovalSection';
 import {
   calculateSubjectProgress,
 } from '../../utils/calculations';
@@ -33,6 +35,7 @@ import {
   ChevronRight,
   ArrowUpRight,
   Lock,
+  Calendar,
 } from 'lucide-react';
 
 import { AccessDenied } from '../common/AccessDenied';
@@ -138,6 +141,19 @@ export const CampusManagerDashboard: React.FC = () => {
     (m) => m.status === 'escalated' || m.hours_overdue >= 48
   ).length;
 
+  const allExtraClassRequests = getExtraClassRequests();
+  const branchExtraClassRequests = useMemo(() => {
+    return allExtraClassRequests.filter((r) => r.branch_id === activeBranch);
+  }, [allExtraClassRequests, activeBranch]);
+
+  const pendingExtraClassesCount = useMemo(() => {
+    return branchExtraClassRequests.filter((r) => r.status === 'pending').length;
+  }, [branchExtraClassRequests]);
+
+  const [activeSectionTab, setActiveSectionTab] = useState<'extra_classes' | 'missed_sessions'>(
+    pendingExtraClassesCount > 0 ? 'extra_classes' : 'extra_classes'
+  );
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -153,10 +169,10 @@ export const CampusManagerDashboard: React.FC = () => {
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1C1917] tracking-tight">
-              Faculty Log Reminders & Overdue Escalations
+              Operational Approvals & Teaching Progress
             </h1>
             <p className="text-xs text-[#78716C] mt-1 max-w-2xl leading-relaxed">
-              Monitors teaching delivery for {currentBranchRecord.name}, triggers faculty reminders, and automatically escalates unlogged sessions after 48 hours.
+              Manages extra class calendar approvals, conflict overrides, faculty teaching reminders, and 48-hour unlogged session escalations for {currentBranchRecord.name}.
             </p>
             <div className="mt-2.5 text-xs font-medium text-[#78716C] bg-[#FAF7F0] px-3 py-1 rounded-full inline-block border border-[#EFE8DC]">
               Affiliated University: <strong className="text-[#1C1917]">{currentBranchRecord.university_affiliation}</strong>
@@ -186,6 +202,12 @@ export const CampusManagerDashboard: React.FC = () => {
                 <Lock className="w-3 h-3 text-[#B08800]" />
               </div>
             )}
+            {pendingExtraClassesCount > 0 && (
+              <div className="px-3.5 py-1.5 rounded-full bg-[#FEF9E7] border border-[#FBE69B] text-[#614800] text-xs font-semibold flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-[#B08800]" />
+                <span>{pendingExtraClassesCount} Extra Classes Pending</span>
+              </div>
+            )}
             <div className="px-3.5 py-1.5 rounded-full bg-[#FDF2F4] border border-[#F8CAD4] text-[#701A4A] text-xs font-semibold flex items-center gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5 text-[#701A4A]" />
               <span>{escalatedCount} Escalated &gt;48h Overdue</span>
@@ -203,6 +225,14 @@ export const CampusManagerDashboard: React.FC = () => {
 
       {/* Overview Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard
+          title="Extra Class Requests"
+          value={pendingExtraClassesCount}
+          subtitle={`${branchExtraClassRequests.length} total • ${pendingExtraClassesCount} pending`}
+          icon={<Calendar className="w-5 h-5 text-[#B08800]" />}
+          highlightColor={pendingExtraClassesCount > 0 ? 'yellow' : 'green'}
+        />
+
         <MetricCard
           title="Campus Subjects"
           value={campusSubjects.length}
@@ -226,17 +256,49 @@ export const CampusManagerDashboard: React.FC = () => {
           icon={<Clock className="w-5 h-5 text-[#644B00]" />}
           highlightColor="yellow"
         />
-
-        <MetricCard
-          title="Overdue Topics"
-          value={overdueTopics.length}
-          subtitle="Behind scheduled plan"
-          icon={<AlertOctagon className="w-5 h-5 text-[#701A4A]" />}
-          highlightColor={overdueTopics.length > 0 ? 'pink' : 'green'}
-        />
       </div>
 
-      {/* Missed Class Logs Table (With 48h Escalation) */}
+      {/* Section Tabs: Extra Class Requests vs Missed Session Escalations */}
+      <div className="flex items-center gap-2 border-b border-[#EFE8DC] pb-1">
+        <button
+          onClick={() => setActiveSectionTab('extra_classes')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeSectionTab === 'extra_classes'
+              ? 'bg-[#1C1917] text-white shadow-2xs'
+              : 'bg-white text-[#78716C] hover:bg-[#FAF7F0] border border-[#EFE8DC]'
+          }`}
+        >
+          <Calendar className="w-4 h-4 text-[#FBE69B]" />
+          <span>Extra Class Approvals</span>
+          {pendingExtraClassesCount > 0 && (
+            <span className="px-2 py-0.2 rounded-full bg-[#FEF9E7] text-[#614800] text-[10px] font-extrabold border border-[#FBE69B]">
+              {pendingExtraClassesCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveSectionTab('missed_sessions')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeSectionTab === 'missed_sessions'
+              ? 'bg-[#1C1917] text-white shadow-2xs'
+              : 'bg-white text-[#78716C] hover:bg-[#FAF7F0] border border-[#EFE8DC]'
+          }`}
+        >
+          <Clock className="w-4 h-4 text-[#78716C]" />
+          <span>Unlogged Classes & Escalations</span>
+          {missedSessions.filter((m) => m.status !== 'resolved').length > 0 && (
+            <span className="px-2 py-0.2 rounded-full bg-[#FAF7F0] text-[#78716C] text-[10px] font-extrabold border border-[#EFE8DC]">
+              {missedSessions.filter((m) => m.status !== 'resolved').length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Active Section Content */}
+      {activeSectionTab === 'extra_classes' ? (
+        <ExtraClassApprovalSection activeBranch={activeBranch} />
+      ) : (
       <div className="bg-white rounded-3xl border border-[#EFE8DC] shadow-2xs overflow-hidden">
         <div className="px-6 py-4 border-b border-[#EFE8DC] bg-[#FAF7F0]/60 flex items-center justify-between">
           <div>
@@ -362,6 +424,7 @@ export const CampusManagerDashboard: React.FC = () => {
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 };

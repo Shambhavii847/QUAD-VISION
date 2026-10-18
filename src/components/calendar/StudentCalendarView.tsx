@@ -12,6 +12,7 @@ import {
   getSemesters,
   getUsers,
   getTopics,
+  getApprovedExtraClasses,
 } from '../../services/storage';
 import {
   TimetableEntry,
@@ -50,7 +51,7 @@ export interface CalendarEvent {
   id: string;
   title: string;
   code?: string;
-  category: 'lecture' | 'lab' | 'exam' | 'holiday';
+  category: 'lecture' | 'lab' | 'exam' | 'holiday' | 'extra_class';
   date: string; // YYYY-MM-DD
   dayOfWeek: number; // 1 = Mon ... 7 = Sun
   startTime: string; // HH:MM (e.g. "09:00")
@@ -63,6 +64,8 @@ export interface CalendarEvent {
   branchId?: BranchId;
   inExamScope?: boolean;
   topicsCoveredSummary?: string;
+  notes?: string;
+  isExtraClass?: boolean;
 }
 
 export const StudentCalendarView: React.FC = () => {
@@ -103,6 +106,7 @@ export const StudentCalendarView: React.FC = () => {
     lab: true,
     exam: true,
     holiday: true,
+    extra_class: true,
   });
 
   // Selected event for Detail Panel
@@ -147,6 +151,17 @@ export const StudentCalendarView: React.FC = () => {
       (h) => !h.branch_id || h.branch_id === activeBranchId || h.campus_id === activeBranchId
     );
   }, [allHolidays, activeBranchId]);
+
+  // Filter confirmed approved extra classes for active student's batch or campus
+  const studentApprovedExtraClasses = useMemo(() => {
+    const list = getApprovedExtraClasses();
+    return list.filter((c) => {
+      if (activeBatch && c.batch_id === activeBatch.id) return true;
+      const matchBranch = c.branch_id === activeBranchId;
+      const matchTrack = c.academic_track === activeTrack;
+      return matchBranch && matchTrack;
+    });
+  }, [activeBatch, activeBranchId, activeTrack]);
 
   // Date helper utilities
   const formatYMD = (d: Date): string => {
@@ -266,6 +281,36 @@ export const StudentCalendarView: React.FC = () => {
       });
     }
 
+    // 4. Approved Extra Classes (Confirmed official events; pending requests NEVER appear)
+    if (enabledCategories.extra_class) {
+      const dayExtraClasses = studentApprovedExtraClasses.filter((c) => c.date === dateStr);
+      dayExtraClasses.forEach((ec) => {
+        events.push({
+          id: `extraclass-${ec.id}-${dateStr}`,
+          title: ec.subject_name || 'Extra Class Session',
+          code: ec.subject_code || 'EXTRA',
+          category: 'extra_class',
+          date: dateStr,
+          dayOfWeek,
+          startTime: ec.start_time,
+          endTime: ec.end_time,
+          durationHours: ec.duration_hours,
+          room: ec.room || 'Seminar Hall',
+          facultyName: ec.faculty_name,
+          subjectId: ec.subject_id,
+          academicTrack: ec.academic_track || activeTrack,
+          branchId: ec.branch_id || activeBranchId,
+          inExamScope: true,
+          topicsCoveredSummary:
+            ec.topic_titles && ec.topic_titles.length > 0
+              ? ec.topic_titles.join(', ')
+              : ec.reason,
+          notes: ec.reason,
+          isExtraClass: true,
+        });
+      });
+    }
+
     return events;
   };
 
@@ -284,7 +329,7 @@ export const StudentCalendarView: React.FC = () => {
       if (list.length >= 5) break;
     }
     return list;
-  }, [selectedDate, studentTimetable, studentExams, studentHolidays, enabledCategories]);
+  }, [selectedDate, studentTimetable, studentExams, studentHolidays, studentApprovedExtraClasses, enabledCategories]);
 
   // Mini Calendar grid generation
   const miniCalendarDays = useMemo(() => {
@@ -331,7 +376,7 @@ export const StudentCalendarView: React.FC = () => {
     }
 
     return days;
-  }, [miniCalendarMonth, studentTimetable, studentExams, studentHolidays, enabledCategories]);
+  }, [miniCalendarMonth, studentTimetable, studentExams, studentHolidays, studentApprovedExtraClasses, enabledCategories]);
 
   // Navigation handlers
   const handlePrevDate = () => {
@@ -421,6 +466,14 @@ export const StudentCalendarView: React.FC = () => {
           text: 'text-[#614800]',
           badge: 'bg-[#614800]/10 text-[#614800]',
           dot: 'bg-[#FACC15]',
+        };
+      case 'extra_class':
+        return {
+          bg: 'bg-[#FFFBEB]',
+          border: 'border-[#FDE68A]',
+          text: 'text-[#92400E]',
+          badge: 'bg-[#FDE68A]/60 text-[#92400E]',
+          dot: 'bg-[#F59E0B]',
         };
       default:
         return {
@@ -661,6 +714,22 @@ export const StudentCalendarView: React.FC = () => {
                     setEnabledCategories((prev) => ({ ...prev, holiday: e.target.checked }))
                   }
                   className="rounded border-[#EFE8DC] text-[#614800] focus:ring-0 cursor-pointer"
+                />
+              </label>
+
+              {/* Extra Class category */}
+              <label className="flex items-center justify-between cursor-pointer group">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
+                  <span className="text-[#1C1917] group-hover:text-black">Extra Classes</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={enabledCategories.extra_class}
+                  onChange={(e) =>
+                    setEnabledCategories((prev) => ({ ...prev, extra_class: e.target.checked }))
+                  }
+                  className="rounded border-[#EFE8DC] text-[#92400E] focus:ring-0 cursor-pointer"
                 />
               </label>
             </div>

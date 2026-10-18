@@ -15,6 +15,9 @@ import {
   AuditTrailEntry,
   CampusId,
   AcademicTrackId,
+  ExtraClassRequest,
+  ApprovedExtraClass,
+  ExtraClassRequestStatus,
 } from '../types';
 import {
   INITIAL_BRANCHES,
@@ -30,8 +33,11 @@ import {
   INITIAL_SESSION_LOGS,
   INITIAL_MISSED_SESSIONS,
   INITIAL_AUDIT_LOGS,
+  INITIAL_EXTRA_CLASS_REQUESTS,
+  INITIAL_APPROVED_EXTRA_CLASSES,
 } from '../data/mockData';
 import { recalculateTopicPlannedDates } from '../utils/calculations';
+import { detectExtraClassClashes, ClashConflict } from '../utils/clashDetection';
 import { isSupabaseConfigured } from './supabaseClient';
 import {
   supabaseFetchAllData,
@@ -67,6 +73,8 @@ const STORAGE_KEYS = {
   SESSION_LOGS: 'msot_session_logs',
   MISSED_SESSIONS: 'msot_missed_sessions',
   AUDIT_LOGS: 'msot_audit_logs',
+  EXTRA_CLASS_REQUESTS: 'msot_extra_class_requests',
+  APPROVED_EXTRA_CLASSES: 'msot_approved_extra_classes',
   CURRENT_USER_ID: 'msot_current_user_id',
 };
 
@@ -257,6 +265,63 @@ export function getMissedSessions(): MissedSessionRecord[] {
 export function getAuditLogs(): AuditTrailEntry[] {
   return getItem(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
 }
+
+export function getExtraClassRequests(): ExtraClassRequest[] {
+  return getItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, INITIAL_EXTRA_CLASS_REQUESTS);
+}
+
+export function getApprovedExtraClasses(): ApprovedExtraClass[] {
+  return getItem(STORAGE_KEYS.APPROVED_EXTRA_CLASSES, INITIAL_APPROVED_EXTRA_CLASSES);
+}
+
+export function getExtraClassRequestsByBranch(branchId?: BranchId): ExtraClassRequest[] {
+  const all = getExtraClassRequests();
+  if (!branchId) return all;
+  return all.filter((r) => r.branch_id === branchId);
+}
+
+export function getExtraClassRequestsForUser(user: UserProfile | null): ExtraClassRequest[] {
+  const all = getExtraClassRequests();
+  if (!user) return [];
+  if (user.role === 'admin') return all;
+  if (user.role === 'campus_manager') {
+    const campus = user.branch_id || user.campus_id;
+    return all.filter((r) => r.branch_id === campus);
+  }
+  if (user.role === 'faculty') {
+    return all.filter((r) => r.faculty_id === user.id);
+  }
+  // Students do not access raw request records
+  return [];
+}
+
+export function getApprovedExtraClassesForUser(user: UserProfile | null): ApprovedExtraClass[] {
+  const all = getApprovedExtraClasses();
+  if (!user) return [];
+  if (user.role === 'admin') return all;
+  if (user.role === 'campus_manager') {
+    const campus = user.branch_id || user.campus_id;
+    return all.filter((c) => c.branch_id === campus);
+  }
+  if (user.role === 'faculty') {
+    return all.filter((c) => c.faculty_id === user.id || c.branch_id === (user.branch_id || user.campus_id));
+  }
+  if (user.role === 'student') {
+    const studentBatches = user.assigned_batch_ids || [];
+    return all.filter((c) => {
+      if (studentBatches.includes(c.batch_id)) return true;
+      const matchBranch = !user.branch_id || c.branch_id === (user.branch_id || user.campus_id);
+      return matchBranch && studentBatches.length === 0;
+    });
+  }
+  return [];
+}
+
+export function getApprovedExtraClassesForBatch(batchId: string): ApprovedExtraClass[] {
+  const all = getApprovedExtraClasses();
+  return all.filter((c) => c.batch_id === batchId);
+}
+
 
 // Branch-filtered convenience queries
 export function getBatchesByBranch(branchId?: BranchId): Batch[] {
@@ -905,3 +970,532 @@ export function saveExamination(
     performedBy
   );
 }
+
+// ==========================================
+// EXTRA CLASS REQUEST & APPROVAL WORKFLOW
+// ==========================================
+
+export interface CreateExtraClassRequestInput {
+  branch_id: BranchId;
+  academic_track: AcademicTrackId;
+  batch_id: string;
+  subject_id: string;
+  date: string; // YYYY-MM-DD
+  start_time: string; // HH:MM
+  end_time: string; // HH:MM
+  room?: string;
+  topic_ids?: string[];
+  topic_titles?: string[];
+  reason: string;
+  notes?: string;
+}
+
+function parseTimeToHours(timeStr: string): number {
+  const [h, m] = timeStr.split(':').map(Number);
+  return h + (m || 0) / 60;
+}
+
+export function createExtraClassRequest(
+  input: CreateExtraClassRequestInput,
+  performedBy: UserProfile
+): { success: boolean; request?: ExtraClassRequest; error?: string } {
+  if (!performedBy) {
+    return { success: false, error: 'Authentication required to submit request.' };
+  }
+
+  if (performedBy.role !== 'faculty' && performedBy.role !== 'admin') {
+    return {
+      success: false,
+      error: 'Permission denied: Only faculty members or administrators can request extra classes.',
+    };
+  }
+
+  // Validate required fields
+  if (
+    !input.branch_id ||
+    !input.academic_track ||
+    !input.batch_id ||
+    !input.subject_id ||
+    !input.date ||
+    !input.start_time ||
+    !input.end_time ||
+    !input.reason?.trim()
+  ) {
+    return {
+      success: false,
+      error: 'Please fill in all required fields (Branch, Track, Batch, Subject, Date, Time, and Reason).',
+    };
+  }
+
+  if (input.start_time >= input.end_time) {
+    return { success: false, error: 'End time must be after start time.' };
+  }
+
+  const durationHours =
+    Math.round((parseTimeToHours(input.end_time) - parseTimeToHours(input.start_time)) * 10) / 10;
+
+  const subjects = getSubjects();
+  const batches = getBatches();
+  const subject = subjects.find((s) => s.id === input.subject_id);
+  const batch = batches.find((b) => b.id === input.batch_id);
+
+  const requestId = 'ecr-' + Date.now();
+  const nowIso = new Date().toISOString();
+
+  const newRequest: ExtraClassRequest = {
+    id: requestId,
+    faculty_id: performedBy.id,
+    faculty_name: performedBy.name,
+    faculty_email: performedBy.email,
+    branch_id: input.branch_id,
+    academic_track: input.academic_track,
+    batch_id: input.batch_id,
+    batch_name: batch?.name || input.batch_id,
+    subject_id: input.subject_id,
+    subject_name: subject?.name || input.subject_id,
+    subject_code: subject?.code || '',
+    date: input.date,
+    start_time: input.start_time,
+    end_time: input.end_time,
+    duration_hours: durationHours > 0 ? durationHours : 1.5,
+    room: input.room || 'Lecture Hall',
+    topic_ids: input.topic_ids || [],
+    topic_titles: input.topic_titles || [],
+    reason: input.reason.trim(),
+    notes: input.notes?.trim() || '',
+    status: 'pending',
+    created_at: nowIso,
+    updated_at: nowIso,
+    history: [
+      {
+        id: 'ecrh-' + Date.now(),
+        action: 'Created extra class request',
+        performed_by_id: performedBy.id,
+        performed_by_name: performedBy.name,
+        timestamp: nowIso,
+        status: 'pending',
+        notes: 'Submitted for Campus Manager review.',
+      },
+    ],
+  };
+
+  const requests = getExtraClassRequests();
+  setItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, [newRequest, ...requests]);
+
+  logAudit(
+    'extra_class',
+    requestId,
+    'create',
+    `Faculty ${performedBy.name} submitted extra class request for ${newRequest.subject_name || newRequest.subject_id} on ${newRequest.date} (${newRequest.start_time}-${newRequest.end_time})`,
+    performedBy
+  );
+
+  return { success: true, request: newRequest };
+}
+
+export function withdrawExtraClassRequest(
+  requestId: string,
+  performedBy: UserProfile
+): { success: boolean; error?: string } {
+  if (!performedBy) {
+    return { success: false, error: 'Authentication required.' };
+  }
+
+  const requests = getExtraClassRequests();
+  const target = requests.find((r) => r.id === requestId);
+
+  if (!target) {
+    return { success: false, error: 'Request not found.' };
+  }
+
+  if (target.status !== 'pending' && target.status !== 'changes_requested') {
+    return {
+      success: false,
+      error: `Cannot withdraw request: Request is already ${target.status}.`,
+    };
+  }
+
+  if (target.faculty_id !== performedBy.id && !canUserAccessAdmin(performedBy)) {
+    return {
+      success: false,
+      error: 'Permission denied: You can only withdraw your own extra class requests.',
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  const updated: ExtraClassRequest = {
+    ...target,
+    status: 'withdrawn',
+    updated_at: nowIso,
+    history: [
+      ...target.history,
+      {
+        id: 'ecrh-' + Date.now(),
+        action: 'Withdrew extra class request',
+        performed_by_id: performedBy.id,
+        performed_by_name: performedBy.name,
+        timestamp: nowIso,
+        status: 'withdrawn',
+        notes: 'Request withdrawn by faculty.',
+      },
+    ],
+  };
+
+  const nextRequests = requests.map((r) => (r.id === requestId ? updated : r));
+  setItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, nextRequests);
+
+  logAudit(
+    'extra_class',
+    requestId,
+    'update',
+    `Faculty ${performedBy.name} withdrew extra class request ${requestId}`,
+    performedBy
+  );
+
+  return { success: true };
+}
+
+export function reviseExtraClassRequest(
+  requestId: string,
+  updates: Partial<CreateExtraClassRequestInput> & { revision_notes?: string },
+  performedBy: UserProfile
+): { success: boolean; request?: ExtraClassRequest; error?: string } {
+  if (!performedBy) {
+    return { success: false, error: 'Authentication required.' };
+  }
+
+  const requests = getExtraClassRequests();
+  const target = requests.find((r) => r.id === requestId);
+
+  if (!target) {
+    return { success: false, error: 'Request not found.' };
+  }
+
+  if (target.status !== 'changes_requested' && target.status !== 'pending') {
+    return {
+      success: false,
+      error: `Cannot revise request with status "${target.status}". Only pending or change-requested requests can be revised.`,
+    };
+  }
+
+  if (target.faculty_id !== performedBy.id && !canUserAccessAdmin(performedBy)) {
+    return {
+      success: false,
+      error: 'Permission denied: You can only revise your own extra class requests.',
+    };
+  }
+
+  const startTime = updates.start_time || target.start_time;
+  const endTime = updates.end_time || target.end_time;
+
+  if (startTime >= endTime) {
+    return { success: false, error: 'End time must be after start time.' };
+  }
+
+  const durationHours =
+    Math.round((parseTimeToHours(endTime) - parseTimeToHours(startTime)) * 10) / 10;
+
+  const nowIso = new Date().toISOString();
+  const updated: ExtraClassRequest = {
+    ...target,
+    ...updates,
+    date: updates.date || target.date,
+    start_time: startTime,
+    end_time: endTime,
+    duration_hours: durationHours > 0 ? durationHours : target.duration_hours,
+    reason: updates.reason !== undefined ? updates.reason.trim() : target.reason,
+    notes: updates.notes !== undefined ? updates.notes.trim() : target.notes,
+    status: 'pending',
+    updated_at: nowIso,
+    history: [
+      ...target.history,
+      {
+        id: 'ecrh-' + Date.now(),
+        action: 'Revised and resubmitted request',
+        performed_by_id: performedBy.id,
+        performed_by_name: performedBy.name,
+        timestamp: nowIso,
+        status: 'pending',
+        notes: updates.revision_notes || 'Revised parameters and resubmitted for approval.',
+      },
+    ],
+  };
+
+  const nextRequests = requests.map((r) => (r.id === requestId ? updated : r));
+  setItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, nextRequests);
+
+  logAudit(
+    'extra_class',
+    requestId,
+    'update',
+    `Faculty ${performedBy.name} revised extra class request for ${updated.subject_name} (${updated.date} ${updated.start_time}-${updated.end_time})`,
+    performedBy
+  );
+
+  return { success: true, request: updated };
+}
+
+export interface ReviewExtraClassRequestInput {
+  decision: 'approve' | 'reject' | 'request_changes';
+  reason?: string;
+  override_reason?: string;
+  change_request_notes?: string;
+  room?: string;
+}
+
+export function reviewExtraClassRequest(
+  requestId: string,
+  input: ReviewExtraClassRequestInput,
+  reviewer: UserProfile
+): { success: boolean; error?: string; conflicts?: ClashConflict[] } {
+  if (!reviewer) {
+    return { success: false, error: 'Authentication required to review extra class requests.' };
+  }
+
+  // Faculty must NOT be able to approve requests or publish events
+  if (reviewer.role === 'faculty') {
+    return {
+      success: false,
+      error: 'Permission denied: Faculty members cannot approve extra class requests or directly publish calendar events.',
+    };
+  }
+
+  if (reviewer.role !== 'campus_manager' && reviewer.role !== 'admin') {
+    return {
+      success: false,
+      error: 'Permission denied: Only Campus Managers or Administrators can review extra class requests.',
+    };
+  }
+
+  // 1. Fresh fetch from storage to guard against race conditions
+  const requests = getExtraClassRequests();
+  const request = requests.find((r) => r.id === requestId);
+
+  if (!request) {
+    return { success: false, error: 'Request not found.' };
+  }
+
+  // 2. Cross-branch isolation check: Campus Manager can review only their branch
+  const reviewerBranch = reviewer.branch_id || reviewer.campus_id;
+  if (reviewer.role === 'campus_manager' && reviewerBranch && reviewerBranch !== request.branch_id) {
+    return {
+      success: false,
+      error: `Access denied: Campus Managers can only review requests for their assigned branch (${reviewerBranch}).`,
+    };
+  }
+
+  // 3. Concurrency check: Ensure request is still pending
+  if (request.status !== 'pending' && request.status !== 'changes_requested') {
+    return {
+      success: false,
+      error: `This request is no longer pending (current status: ${request.status.toUpperCase()}). Simultaneous approval or modification prevented.`,
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // 4. Handle APPROVE
+  if (input.decision === 'approve') {
+    // Re-check timetable and calendar conflicts at time of submission
+    const existingRequests = getExtraClassRequests();
+    const timetable = getTimetable();
+    const examinations = getExaminations();
+    const holidays = getHolidays();
+    const subjects = getSubjects();
+    const batches = getBatches();
+
+    const clashResult = detectExtraClassClashes(request, {
+      existingRequests,
+      timetable,
+      examinations,
+      holidays,
+      subjects,
+      batches,
+    });
+
+    // Duplicate requests can NEVER be approved
+    const hasDuplicate = clashResult.conflicts.some((c) => c.type === 'duplicate_request');
+    if (hasDuplicate) {
+      return {
+        success: false,
+        error: 'Cannot approve request: A duplicate extra class booking already exists for this subject, batch, date, and time.',
+        conflicts: clashResult.conflicts,
+      };
+    }
+
+    // If other conflicts exist, manager must supply an explicit override reason
+    if (clashResult.hasClashes && !input.override_reason?.trim()) {
+      return {
+        success: false,
+        error: 'Schedule conflicts detected. You must resolve the conflict or supply an authorized override reason.',
+        conflicts: clashResult.conflicts,
+      };
+    }
+
+    // Create official calendar event
+    const approvedEvent: ApprovedExtraClass = {
+      id: 'aec-' + Date.now(),
+      request_id: request.id,
+      subject_id: request.subject_id,
+      subject_name: request.subject_name || '',
+      subject_code: request.subject_code || '',
+      batch_id: request.batch_id,
+      batch_name: request.batch_name || '',
+      branch_id: request.branch_id,
+      academic_track: request.academic_track,
+      date: request.date,
+      start_time: request.start_time,
+      end_time: request.end_time,
+      duration_hours: request.duration_hours,
+      room: input.room || request.room || 'Lecture Hall',
+      faculty_id: request.faculty_id,
+      faculty_name: request.faculty_name,
+      topic_ids: request.topic_ids,
+      topic_titles: request.topic_titles,
+      reason: request.reason,
+      approved_by_id: reviewer.id,
+      approved_by_name: reviewer.name,
+      approved_at: nowIso,
+      override_reason: input.override_reason?.trim(),
+    };
+
+    const approvedList = getApprovedExtraClasses();
+    setItem(STORAGE_KEYS.APPROVED_EXTRA_CLASSES, [approvedEvent, ...approvedList]);
+
+    // Update request status to APPROVED
+    const updatedRequest: ExtraClassRequest = {
+      ...request,
+      status: 'approved',
+      room: input.room || request.room,
+      override_reason: input.override_reason?.trim(),
+      reviewed_by_id: reviewer.id,
+      reviewed_by_name: reviewer.name,
+      reviewed_at: nowIso,
+      updated_at: nowIso,
+      history: [
+        ...request.history,
+        {
+          id: 'ecrh-' + Date.now(),
+          action: 'Approved extra class request',
+          performed_by_id: reviewer.id,
+          performed_by_name: reviewer.name,
+          timestamp: nowIso,
+          status: 'approved',
+          notes: input.override_reason?.trim()
+            ? `Approved with authorized conflict override: "${input.override_reason.trim()}"`
+            : 'Approved without conflicts and scheduled to academic calendar.',
+        },
+      ],
+    };
+
+    const nextRequests = requests.map((r) => (r.id === requestId ? updatedRequest : r));
+    setItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, nextRequests);
+
+    // Trigger recalculation of planned dates and teaching hours
+    triggerPlannedDatesRecalculation(request.subject_id, reviewer);
+
+    logAudit(
+      'extra_class',
+      request.id,
+      'update',
+      `${reviewer.role === 'admin' ? 'Administrator' : 'Campus Manager'} ${reviewer.name} approved extra class for ${request.subject_name} on ${request.date} (${request.start_time}-${request.end_time})${input.override_reason ? ' [OVERRIDE: ' + input.override_reason + ']' : ''}`,
+      reviewer
+    );
+
+    return { success: true };
+  }
+
+  // 5. Handle REJECT
+  if (input.decision === 'reject') {
+    if (!input.reason?.trim()) {
+      return {
+        success: false,
+        error: 'Mandatory rejection reason must be provided.',
+      };
+    }
+
+    const updatedRequest: ExtraClassRequest = {
+      ...request,
+      status: 'rejected',
+      rejection_reason: input.reason.trim(),
+      reviewed_by_id: reviewer.id,
+      reviewed_by_name: reviewer.name,
+      reviewed_at: nowIso,
+      updated_at: nowIso,
+      history: [
+        ...request.history,
+        {
+          id: 'ecrh-' + Date.now(),
+          action: 'Rejected extra class request',
+          performed_by_id: reviewer.id,
+          performed_by_name: reviewer.name,
+          timestamp: nowIso,
+          status: 'rejected',
+          notes: `Rejection reason: ${input.reason.trim()}`,
+        },
+      ],
+    };
+
+    const nextRequests = requests.map((r) => (r.id === requestId ? updatedRequest : r));
+    setItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, nextRequests);
+
+    logAudit(
+      'extra_class',
+      request.id,
+      'update',
+      `${reviewer.name} rejected extra class request for ${request.subject_name}. Reason: ${input.reason.trim()}`,
+      reviewer
+    );
+
+    return { success: true };
+  }
+
+  // 6. Handle REQUEST CHANGES
+  if (input.decision === 'request_changes') {
+    const changeNotes = (input.change_request_notes || input.reason || '').trim();
+    if (!changeNotes) {
+      return {
+        success: false,
+        error: 'Please describe the required changes for the faculty member.',
+      };
+    }
+
+    const updatedRequest: ExtraClassRequest = {
+      ...request,
+      status: 'changes_requested',
+      change_request_notes: changeNotes,
+      reviewed_by_id: reviewer.id,
+      reviewed_by_name: reviewer.name,
+      reviewed_at: nowIso,
+      updated_at: nowIso,
+      history: [
+        ...request.history,
+        {
+          id: 'ecrh-' + Date.now(),
+          action: 'Requested changes for extra class',
+          performed_by_id: reviewer.id,
+          performed_by_name: reviewer.name,
+          timestamp: nowIso,
+          status: 'changes_requested',
+          notes: `Requested changes: ${changeNotes}`,
+        },
+      ],
+    };
+
+    const nextRequests = requests.map((r) => (r.id === requestId ? updatedRequest : r));
+    setItem(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, nextRequests);
+
+    logAudit(
+      'extra_class',
+      request.id,
+      'update',
+      `${reviewer.name} requested changes on extra class request for ${request.subject_name}: ${changeNotes}`,
+      reviewer
+    );
+
+    return { success: true };
+  }
+
+  return { success: false, error: 'Invalid decision specified.' };
+}
+
