@@ -2,9 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../services/authContext';
 import {
   getSubjects,
+  getSubjectsForUser,
   getTimetable,
   getSessionLogs,
   getBatches,
+  getBatchesForUser,
   getTopics,
   getUsers,
   getMissedSessions,
@@ -14,6 +16,7 @@ import { isSupabaseConfigured } from '../../services/supabaseClient';
 import { SessionLoggingModal } from './SessionLoggingModal';
 import { RequestExtraClassModal } from './RequestExtraClassModal';
 import { MyExtraClassRequests } from './MyExtraClassRequests';
+import { FacultyDailyRecapSection } from './FacultyDailyRecapSection';
 import { TimetableEntry, SessionLog } from '../../types';
 import { calculateHoursInScope, calculateCoveredHours, calculateCoveragePercentage } from '../../utils/calculations';
 import {
@@ -35,6 +38,7 @@ import {
   AlertTriangle,
   ChevronRight,
   Info,
+  Sparkles,
 } from 'lucide-react';
 import { AccessDenied } from '../common/AccessDenied';
 import { Modal } from '../common/Modal';
@@ -63,7 +67,7 @@ export const FacultyDashboard: React.FC = () => {
   const [isExtraClassModalOpen, setIsExtraClassModalOpen] = useState(false);
 
   // Filters state
-  const [activeTab, setActiveTab] = useState<'logs' | 'schedule' | 'extra_classes'>(
+  const [activeTab, setActiveTab] = useState<'logs' | 'schedule' | 'extra_classes' | 'recaps'>(
     isAdministrativeRole ? 'logs' : 'schedule'
   );
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,23 +92,26 @@ export const FacultyDashboard: React.FC = () => {
   // Branch isolation: If Campus Manager, restrict scope to their branch
   const userBranchId = currentUser?.branch_id || currentUser?.campus_id;
   const branchBatches = useMemo(() => {
+    if (isFaculty) {
+      return getBatchesForUser(currentUser);
+    }
     if (isCampusManager && userBranchId) {
       return batches.filter((b) => (b.branch_id || b.campus_id) === userBranchId);
     }
     return batches;
-  }, [batches, isCampusManager, userBranchId]);
+  }, [batches, isFaculty, isCampusManager, userBranchId, currentUser]);
 
   const branchBatchIds = useMemo(() => branchBatches.map((b) => b.id), [branchBatches]);
 
   const accessibleSubjects = useMemo(() => {
     if (isFaculty) {
-      return subjects.filter((s) => s.faculty_id === currentUser?.id);
+      return getSubjectsForUser(currentUser);
     }
     if (isCampusManager && userBranchId) {
       return subjects.filter((s) => branchBatchIds.includes(s.batch_id) || s.branch_id === userBranchId);
     }
     return subjects;
-  }, [subjects, isFaculty, isCampusManager, userBranchId, currentUser?.id, branchBatchIds]);
+  }, [subjects, isFaculty, isCampusManager, userBranchId, currentUser, branchBatchIds]);
 
   const accessibleSubjectIds = useMemo(() => accessibleSubjects.map((s) => s.id), [accessibleSubjects]);
 
@@ -141,10 +148,15 @@ export const FacultyDashboard: React.FC = () => {
     });
   }, [missedSessions, isFaculty, isCampusManager, userBranchId, currentUser?.id]);
 
-  // Faculty user list for filters
+  // Faculty user list for filters (campus scoped for Campus Manager)
   const facultyMembers = useMemo(() => {
+    if (isCampusManager && userBranchId) {
+      return users.filter(
+        (u) => u.role === 'faculty' && ((u.branch_id || u.campus_id) === userBranchId)
+      );
+    }
     return users.filter((u) => u.role === 'faculty');
-  }, [users]);
+  }, [users, isCampusManager, userBranchId]);
 
   // Filtered Class Logs
   const filteredLogs = useMemo(() => {
@@ -353,6 +365,17 @@ export const FacultyDashboard: React.FC = () => {
               {myPendingRequestsCount} Pending
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('recaps')}
+          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'recaps'
+              ? 'bg-[#1C1917] text-white shadow-xs'
+              : 'text-[#71695F] hover:text-[#1C1917] hover:bg-white'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-[#B08800]" />
+          <span>Daily 5-Min Recaps</span>
         </button>
       </div>
 
@@ -707,6 +730,11 @@ export const FacultyDashboard: React.FC = () => {
       {/* Extra Class Requests Tab Content */}
       {activeTab === 'extra_classes' && (
         <MyExtraClassRequests onNewRequestClick={() => setIsExtraClassModalOpen(true)} />
+      )}
+
+      {/* Daily 5-Minute Recaps Content */}
+      {activeTab === 'recaps' && (
+        <FacultyDailyRecapSection />
       )}
 
       {/* Record Inspection Modal */}

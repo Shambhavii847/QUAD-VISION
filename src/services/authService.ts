@@ -359,6 +359,11 @@ export function canFacultyModifySubject(user: UserProfile | null, subject: Subje
     return campusMatch;
   }
   if (user.role === 'faculty') {
+    const userCampus = user.branch_id || user.campus_id;
+    const subjectCampus = subject.branch_id || subject.campus_id;
+    if (userCampus && subjectCampus && userCampus !== subjectCampus) {
+      return false;
+    }
     return subject.faculty_id === user.id || Boolean(user.assigned_subject_ids?.includes(subject.id));
   }
   return false;
@@ -371,6 +376,11 @@ export function canFacultyEditSessionLog(user: UserProfile | null, session: Sess
     return (user.branch_id || user.campus_id) === (session.branch_id || session.campus_id);
   }
   if (user.role === 'faculty') {
+    const userCampus = user.branch_id || user.campus_id;
+    const sessionCampus = session.branch_id || session.campus_id;
+    if (userCampus && sessionCampus && userCampus !== sessionCampus) {
+      return false;
+    }
     return user.id === session.faculty_id;
   }
   return false;

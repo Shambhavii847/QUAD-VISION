@@ -6,6 +6,7 @@ import {
   getSemesters,
   getHolidays,
   getSubjects,
+  getSubjectsForUser,
   getTopics,
   getTimetable,
 } from '../../services/storage';
@@ -29,11 +30,11 @@ import {
 } from 'lucide-react';
 
 export const SubjectProgressDashboard: React.FC = () => {
-  const { currentUser, isCampusManager, isAdmin } = useAuth();
+  const { currentUser, isCampusManager, isFaculty, isAdmin } = useAuth();
   const branches = getBranches();
 
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
-  const initialBranch: BranchId = isCampusManager && userAssignedBranch ? userAssignedBranch : (userAssignedBranch || 'Ghaziabad');
+  const initialBranch: BranchId = !isAdmin && userAssignedBranch ? userAssignedBranch : (userAssignedBranch || 'Ghaziabad');
 
   const [selectedBranch, setSelectedBranch] = useState<BranchId>(initialBranch);
   const [selectedTrack, setSelectedTrack] = useState<AcademicTrackId>(
@@ -42,10 +43,10 @@ export const SubjectProgressDashboard: React.FC = () => {
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('all');
 
   useEffect(() => {
-    if (isCampusManager && userAssignedBranch) {
+    if (!isAdmin && userAssignedBranch) {
       setSelectedBranch(userAssignedBranch);
     }
-  }, [currentUser, isCampusManager, userAssignedBranch]);
+  }, [currentUser, isAdmin, userAssignedBranch]);
 
   const batches = getBatches();
   const semesters = getSemesters();
@@ -88,12 +89,16 @@ export const SubjectProgressDashboard: React.FC = () => {
   }, [allTimetable, selectedBranch, currentBatch]);
 
   const batchSubjects = useMemo(() => {
+    if (isFaculty) {
+      const mySubjects = getSubjectsForUser(currentUser);
+      return mySubjects.filter((s) => !s.academic_track || s.academic_track === selectedTrack);
+    }
     return subjects.filter((s) => {
       const matchBatch = s.batch_id === currentBatch?.id;
       const matchBranch = !s.branch_id || s.branch_id === selectedBranch;
       return matchBatch && matchBranch;
     });
-  }, [subjects, currentBatch, selectedBranch]);
+  }, [subjects, currentBatch, selectedBranch, isFaculty, currentUser, selectedTrack]);
 
   const progressList = useMemo(() => {
     if (!currentSemester) return [];
@@ -141,10 +146,10 @@ export const SubjectProgressDashboard: React.FC = () => {
             <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-[#FAF7F0] border border-[#EFE8DC] text-xs">
               <Building2 className="w-3.5 h-3.5 text-[#71695F]" />
               <span className="font-medium text-[#71695F]">Branch:</span>
-              {isCampusManager ? (
+              {!isAdmin ? (
                 <div className="flex items-center gap-1.5 font-semibold text-[#1C1917]">
                   <span>{selectedBranch}</span>
-                  <Lock className="w-3 h-3 text-[#B08800]" />
+                  {isCampusManager && <Lock className="w-3 h-3 text-[#B08800]" />}
                 </div>
               ) : (
                 <select

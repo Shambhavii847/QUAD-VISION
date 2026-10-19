@@ -52,8 +52,15 @@ export const BookshelfHome: React.FC<BookshelfHomeProps> = ({ onSelectSubject })
   // Branch context
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
   const [selectedBranch, setSelectedBranch] = useState<BranchId | 'ALL'>(
-    isCampusManager && userAssignedBranch ? userAssignedBranch : 'ALL'
+    !isAdmin && userAssignedBranch ? userAssignedBranch : 'ALL'
   );
+
+  // Sync when user changes
+  React.useEffect(() => {
+    if (!isAdmin && userAssignedBranch) {
+      setSelectedBranch(userAssignedBranch);
+    }
+  }, [isAdmin, userAssignedBranch]);
 
   // Track filter chip: 'ALL' | 'Mirai Track' | 'University Track'
   const [selectedTrack, setSelectedTrack] = useState<'ALL' | AcademicTrackId>('ALL');
@@ -68,14 +75,13 @@ export const BookshelfHome: React.FC<BookshelfHomeProps> = ({ onSelectSubject })
       return getSubjects();
     }
     // Otherwise, respect user's scope (faculty / campus manager / student)
-    const userSubs = getSubjectsForUser(currentUser);
-    return userSubs.length > 0 ? userSubs : getSubjects();
+    return getSubjectsForUser(currentUser);
   }, [currentUser, isAdmin]);
 
   // Filter subjects based on branch, track, and search query
   const filteredSubjects = useMemo(() => {
     return accessibleSubjects.filter((subject) => {
-      // Branch filter
+      // Branch filter (if admin or applicable)
       if (selectedBranch !== 'ALL') {
         const matchesBranch = !subject.branch_id || subject.branch_id === selectedBranch;
         if (!matchesBranch) return false;
@@ -207,6 +213,12 @@ export const BookshelfHome: React.FC<BookshelfHomeProps> = ({ onSelectSubject })
               <span>Academic Curriculum Library</span>
               <span className="w-1 h-1 rounded-full bg-[#8C8275]" />
               <span className="text-[#71695F] font-normal">Term 2026-2027</span>
+              {userAssignedBranch && !isAdmin && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-[#8C8275]" />
+                  <span className="text-[#1C1917] font-semibold">{userAssignedBranch} Campus</span>
+                </>
+              )}
             </div>
 
             <h1 className="text-3xl sm:text-4xl lg:text-[40px] font-serif font-bold tracking-tight text-[#1C1917] leading-tight">
@@ -231,41 +243,38 @@ export const BookshelfHome: React.FC<BookshelfHomeProps> = ({ onSelectSubject })
             </div>
           </div>
 
-          {/* Right Hero Badge / Context card */}
-          <div className="shrink-0 p-4 rounded-2xl bg-white/90 border border-[#EFE8DC] shadow-sm max-w-xs backdrop-blur-xs">
-            <div className="flex items-center gap-2 text-xs font-semibold text-[#1C1917]">
-              <GraduationCap className="w-4 h-4 text-[#2A5C37]" />
-              <span>Campus Affiliations</span>
+          {/* Right Hero Badge for Admin only */}
+          {isAdmin && (
+            <div className="shrink-0 p-4 rounded-2xl bg-white/90 border border-[#EFE8DC] shadow-sm max-w-xs backdrop-blur-xs">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#1C1917]">
+                <GraduationCap className="w-4 h-4 text-[#2A5C37]" />
+                <span>Global Curriculum Scope</span>
+              </div>
+              <p className="text-[11px] text-[#71695F] mt-1">
+                Institutional view across all supported campus syllabi.
+              </p>
+              <div className="mt-3 pt-2.5 border-t border-[#EFE8DC] flex items-center justify-between text-[11px]">
+                <span className="text-[#8C8275]">User Scope</span>
+                <span className="font-semibold text-[#1C1917] capitalize">
+                  Administrator
+                </span>
+              </div>
             </div>
-            <p className="text-[11px] text-[#71695F] mt-1">
-              Supports AKTU (Ghaziabad), VTU (Bangalore) and Jagannath University (Jaipur).
-            </p>
-            <div className="mt-3 pt-2.5 border-t border-[#EFE8DC] flex items-center justify-between text-[11px]">
-              <span className="text-[#8C8275]">User Scope</span>
-              <span className="font-semibold text-[#1C1917] capitalize">
-                {currentUser?.role?.replace('_', ' ') || 'Guest'}
-              </span>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
       {/* Control Bar: Search & Filter Strip */}
       <div className="space-y-4">
-        {/* Branch Context Selector (Ghaziabad / Bangalore / Jaipur / All) */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-[#1C1917] flex items-center gap-1.5">
-              <Building2 className="w-3.5 h-3.5 text-[#71695F]" />
-              <span>Campus Context:</span>
-            </span>
-
-            {/* If campus manager, lock to their branch */}
-            {isCampusManager && userAssignedBranch ? (
-              <span className="px-3 py-1 rounded-xl bg-[#FAF7F0] border border-[#EFE8DC] text-xs font-bold text-[#1C1917]">
-                {userAssignedBranch} Campus
+        {/* Branch Context Selector (Ghaziabad / Bangalore / Jaipur / All) - ONLY FOR ADMIN */}
+        {isAdmin && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-[#1C1917] flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-[#71695F]" />
+                <span>Campus Context:</span>
               </span>
-            ) : (
+
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
@@ -293,14 +302,14 @@ export const BookshelfHome: React.FC<BookshelfHomeProps> = ({ onSelectSubject })
                   </button>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
 
-          <div className="text-xs text-[#8C8275]">
-            Showing <strong className="text-[#1C1917]">{filteredSubjects.length}</strong> of{' '}
-            {accessibleSubjects.length} subjects
+            <div className="text-xs text-[#8C8275]">
+              Showing <strong className="text-[#1C1917]">{filteredSubjects.length}</strong> of{' '}
+              {accessibleSubjects.length} subjects
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Search Bar + Track Filter Chips */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 p-3 sm:p-4 bg-white rounded-2xl border border-[#EFE8DC] shadow-[0_2px_10px_rgba(28,25,23,0.02)]">
@@ -392,6 +401,13 @@ export const BookshelfHome: React.FC<BookshelfHomeProps> = ({ onSelectSubject })
                 {universityCount}
               </span>
             </button>
+
+            {!isAdmin && (
+              <span className="text-xs text-[#8C8275] ml-1.5 hidden md:inline">
+                Showing <strong className="text-[#1C1917]">{filteredSubjects.length}</strong> of{' '}
+                {accessibleSubjects.length} courses
+              </span>
+            )}
           </div>
         </div>
       </div>

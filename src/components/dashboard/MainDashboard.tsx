@@ -51,9 +51,9 @@ export const MainDashboard: React.FC = () => {
   const { currentUser, isAdmin, isCampusManager } = useAuth();
   const branches = getBranches();
 
-  // Branch isolation: Campus Managers strictly locked to their assigned branch
+  // Branch isolation: Non-admin users strictly locked to their assigned branch
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
-  const initialBranch: BranchId = isCampusManager && userAssignedBranch ? userAssignedBranch : (userAssignedBranch || 'Ghaziabad');
+  const initialBranch: BranchId = !isAdmin && userAssignedBranch ? userAssignedBranch : (userAssignedBranch || 'Ghaziabad');
 
   const [selectedBranch, setSelectedBranch] = useState<BranchId>(initialBranch);
   const [selectedTrack, setSelectedTrack] = useState<AcademicTrackId>(
@@ -64,10 +64,10 @@ export const MainDashboard: React.FC = () => {
 
   // Sync if current user changes
   useEffect(() => {
-    if (isCampusManager && userAssignedBranch) {
+    if (!isAdmin && userAssignedBranch) {
       setSelectedBranch(userAssignedBranch);
     }
-  }, [currentUser, isCampusManager, userAssignedBranch]);
+  }, [currentUser, isAdmin, userAssignedBranch]);
 
   const batches = getBatches();
   const semesters = getSemesters();
@@ -277,10 +277,10 @@ export const MainDashboard: React.FC = () => {
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-[#EFE8DC] shadow-2xs">
             <Building2 className="w-3.5 h-3.5 text-[#78716C]" />
             <span className="text-[11px] font-medium text-[#78716C]">Branch:</span>
-            {isCampusManager ? (
+            {!isAdmin ? (
               <div className="flex items-center gap-1 text-xs font-semibold text-[#1C1917]">
                 <span>{selectedBranch}</span>
-                <Lock className="w-3 h-3 text-[#B08800]" />
+                {isCampusManager && <Lock className="w-3 h-3 text-[#B08800]" />}
               </div>
             ) : (
               <select

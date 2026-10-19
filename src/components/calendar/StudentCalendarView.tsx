@@ -82,11 +82,25 @@ export const StudentCalendarView: React.FC = () => {
 
   // Active student context
   const userBatches = getBatchesForUser(currentUser);
-  const defaultBatch = userBatches[0] || allBatches[0];
+  const userCampus = currentUser?.branch_id || currentUser?.campus_id;
+
+  const selectableBatches = useMemo(() => {
+    if (isAdmin) return allBatches;
+    if (isFaculty) {
+      const ub = getBatchesForUser(currentUser);
+      return ub.length > 0 ? ub : allBatches.filter((b) => (b.branch_id || b.campus_id) === userCampus);
+    }
+    if (isCampusManager) {
+      return allBatches.filter((b) => (b.branch_id || b.campus_id) === userCampus);
+    }
+    return userBatches;
+  }, [isAdmin, isFaculty, isCampusManager, allBatches, currentUser, userCampus, userBatches]);
+
+  const defaultBatch = selectableBatches[0] || userBatches[0] || allBatches[0];
 
   // For Admin / Faculty / Campus Manager: allow switching branch / batch context
   const [selectedBatchId, setSelectedBatchId] = useState<string>(defaultBatch?.id || '');
-  const activeBatch = allBatches.find((b) => b.id === selectedBatchId) || defaultBatch;
+  const activeBatch = selectableBatches.find((b) => b.id === selectedBatchId) || defaultBatch;
 
   const activeBranchId = (activeBatch?.branch_id || currentUser?.branch_id || 'Ghaziabad') as BranchId;
   const activeTrack = (activeBatch?.academic_track || currentUser?.assigned_track || 'Mirai Track') as AcademicTrackId;
@@ -534,15 +548,15 @@ export const StudentCalendarView: React.FC = () => {
 
         {/* Batch & Campus Context Tag / Selector */}
         <div className="flex items-center gap-3 shrink-0">
-          {!isStudent && allBatches.length > 1 ? (
+          {!isStudent && selectableBatches.length > 1 ? (
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-[#71695F]">Select Batch:</span>
               <select
                 value={selectedBatchId}
                 onChange={(e) => setSelectedBatchId(e.target.value)}
-                className="px-3 py-2 rounded-xl border border-[#EFE8DC] bg-white text-xs font-medium text-[#1C1917] focus:outline-hidden"
+                className="px-3 py-2 rounded-xl border border-[#EFE8DC] bg-white text-xs font-medium text-[#1C1917] focus:outline-hidden cursor-pointer"
               >
-                {allBatches.map((b) => (
+                {selectableBatches.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} ({b.academic_track})
                   </option>
@@ -552,7 +566,7 @@ export const StudentCalendarView: React.FC = () => {
           ) : (
             <div className="px-4 py-2.5 rounded-2xl bg-[#FEF9E7] border border-[#FBE69B] text-xs shrink-0">
               <span className="text-[#614800] block text-[10px] font-medium uppercase tracking-wider">
-                Current Enrollment
+                {isFaculty ? 'Assigned Batch' : 'Current Enrollment'}
               </span>
               <span className="font-bold text-[#614800] block text-xs mt-0.5 truncate max-w-[200px]">
                 {activeBatch?.name || 'Academic Batch'}

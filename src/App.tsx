@@ -12,8 +12,10 @@ import { LessonPlanManagement } from './components/lessonPlan/LessonPlanManageme
 import { CalendarTimetable } from './components/calendar/CalendarTimetable';
 import { ExamReadinessDashboard } from './components/exams/ExamReadinessDashboard';
 import { StudentPortal } from './components/student/StudentPortal';
+import { OpportunitiesHub } from './components/opportunities/OpportunitiesHub';
 import { CampusManagerDashboard } from './components/campusManager/CampusManagerDashboard';
 import { AdminManagement } from './components/admin/AdminManagement';
+import { AIAssistantFloatingButton } from './components/ai/AIAssistantFloatingButton';
 import { UserRole } from './types';
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -42,6 +44,9 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Floating CourseTracker AI Assistant */}
+      <AIAssistantFloatingButton />
     </div>
   );
 };
@@ -111,6 +116,21 @@ const AppRoutes: React.FC = () => {
             <AppLayout>
               <RequireRole allowedRoles={['student', 'admin']} requiredLabel="Student Portal">
                 <StudentPortal />
+              </RequireRole>
+            </AppLayout>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+
+      <Route
+        path="/opportunities"
+        element={
+          currentUser ? (
+            <AppLayout>
+              <RequireRole allowedRoles={['student', 'admin']} requiredLabel="Opportunities Hub">
+                <OpportunitiesHub />
               </RequireRole>
             </AppLayout>
           ) : (

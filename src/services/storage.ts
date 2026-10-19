@@ -18,6 +18,16 @@ import {
   ExtraClassRequest,
   ApprovedExtraClass,
   ExtraClassRequestStatus,
+  StudentOpportunity,
+  OpportunityPublicationStatus,
+  DailyLearningTest,
+  DailyRecapQuiz,
+  DailyRecapQuestion,
+  StudentRecapQuestion,
+  StudentRecapQuizView,
+  StudentQuizAttempt,
+  QuestionResultItem,
+  DailyLearningTestWeakTopic,
 } from '../types';
 import {
   INITIAL_BRANCHES,
@@ -35,8 +45,12 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_EXTRA_CLASS_REQUESTS,
   INITIAL_APPROVED_EXTRA_CLASSES,
+  INITIAL_OPPORTUNITIES,
+  INITIAL_DAILY_LEARNING_TESTS,
+  INITIAL_DAILY_RECAP_QUIZZES,
+  INITIAL_STUDENT_QUIZ_ATTEMPTS,
 } from '../data/mockData';
-import { recalculateTopicPlannedDates } from '../utils/calculations';
+import { recalculateTopicPlannedDates, formatDateYMD } from '../utils/calculations';
 import { detectExtraClassClashes, ClashConflict } from '../utils/clashDetection';
 import { isSupabaseConfigured } from './supabaseClient';
 import {
@@ -75,6 +89,10 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'msot_audit_logs',
   EXTRA_CLASS_REQUESTS: 'msot_extra_class_requests',
   APPROVED_EXTRA_CLASSES: 'msot_approved_extra_classes',
+  OPPORTUNITIES: 'msot_opportunities',
+  DAILY_LEARNING_TESTS: 'msot_daily_learning_tests',
+  DAILY_RECAP_QUIZZES: 'msot_daily_recap_quizzes',
+  STUDENT_QUIZ_ATTEMPTS: 'msot_student_quiz_attempts',
   CURRENT_USER_ID: 'msot_current_user_id',
 };
 
@@ -201,6 +219,12 @@ export function resetToDemoData(): void {
   safeSetStorage(STORAGE_KEYS.SESSION_LOGS, JSON.stringify(INITIAL_SESSION_LOGS));
   safeSetStorage(STORAGE_KEYS.MISSED_SESSIONS, JSON.stringify(INITIAL_MISSED_SESSIONS));
   safeSetStorage(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(INITIAL_AUDIT_LOGS));
+  safeSetStorage(STORAGE_KEYS.EXTRA_CLASS_REQUESTS, JSON.stringify(INITIAL_EXTRA_CLASS_REQUESTS));
+  safeSetStorage(STORAGE_KEYS.APPROVED_EXTRA_CLASSES, JSON.stringify(INITIAL_APPROVED_EXTRA_CLASSES));
+  safeSetStorage(STORAGE_KEYS.OPPORTUNITIES, JSON.stringify(INITIAL_OPPORTUNITIES));
+  safeSetStorage(STORAGE_KEYS.DAILY_LEARNING_TESTS, JSON.stringify(INITIAL_DAILY_LEARNING_TESTS));
+  safeSetStorage(STORAGE_KEYS.DAILY_RECAP_QUIZZES, JSON.stringify(INITIAL_DAILY_RECAP_QUIZZES));
+  safeSetStorage(STORAGE_KEYS.STUDENT_QUIZ_ATTEMPTS, JSON.stringify(INITIAL_STUDENT_QUIZ_ATTEMPTS));
   safeSetStorage(STORAGE_KEYS.CURRENT_USER_ID, JSON.stringify(''));
   notifyListeners();
 }
@@ -272,6 +296,14 @@ export function getExtraClassRequests(): ExtraClassRequest[] {
 
 export function getApprovedExtraClasses(): ApprovedExtraClass[] {
   return getItem(STORAGE_KEYS.APPROVED_EXTRA_CLASSES, INITIAL_APPROVED_EXTRA_CLASSES);
+}
+
+export function getOpportunities(): StudentOpportunity[] {
+  return getItem(STORAGE_KEYS.OPPORTUNITIES, INITIAL_OPPORTUNITIES);
+}
+
+export function getDailyLearningTests(): DailyLearningTest[] {
+  return getItem(STORAGE_KEYS.DAILY_LEARNING_TESTS, INITIAL_DAILY_LEARNING_TESTS);
 }
 
 export function getExtraClassRequestsByBranch(branchId?: BranchId): ExtraClassRequest[] {
@@ -373,11 +405,15 @@ export function getBatchesForUser(user: UserProfile | null): Batch[] {
     return allBatches.filter((b) => user.assigned_batch_ids && user.assigned_batch_ids.includes(b.id));
   }
   if (user.role === 'faculty') {
-    const subjects = getSubjects().filter(
-      (s) => s.faculty_id === user.id || user.assigned_subject_ids?.includes(s.id)
-    );
+    const subjects = getSubjectsForUser(user);
     const batchIds = new Set(subjects.map((s) => s.batch_id));
-    return allBatches.filter((b) => batchIds.has(b.id));
+    const campus = user.branch_id || user.campus_id;
+    return allBatches.filter((b) => {
+      if (campus && (b.branch_id || b.campus_id) && (b.branch_id || b.campus_id) !== campus) {
+        return false;
+      }
+      return batchIds.has(b.id);
+    });
   }
   return [];
 }
@@ -391,9 +427,13 @@ export function getSubjectsForUser(user: UserProfile | null): Subject[] {
     return allSubjects.filter((s) => (s.branch_id || s.campus_id) === campus);
   }
   if (user.role === 'faculty') {
-    return allSubjects.filter(
-      (s) => s.faculty_id === user.id || user.assigned_subject_ids?.includes(s.id)
-    );
+    const campus = user.branch_id || user.campus_id;
+    return allSubjects.filter((s) => {
+      if (campus && (s.branch_id || s.campus_id) && (s.branch_id || s.campus_id) !== campus) {
+        return false;
+      }
+      return s.faculty_id === user.id || Boolean(user.assigned_subject_ids?.includes(s.id));
+    });
   }
   if (user.role === 'student') {
     const allowedBatchIds = user.assigned_batch_ids || [];
@@ -417,7 +457,14 @@ export function getExaminationsForUser(user: UserProfile | null): Examination[] 
   if (user.role === 'faculty') {
     const mySubjects = getSubjectsForUser(user);
     const myBatchIds = new Set(mySubjects.map((s) => s.batch_id));
-    return allExams.filter((e) => myBatchIds.has(e.batch_id));
+    const mySubjectIds = new Set(mySubjects.map((s) => s.id));
+    const campus = user.branch_id || user.campus_id;
+    return allExams.filter((e) => {
+      if (campus && (e.branch_id || e.campus_id) && (e.branch_id || e.campus_id) !== campus) {
+        return false;
+      }
+      return myBatchIds.has(e.batch_id) || mySubjectIds.has(e.subject_id);
+    });
   }
   return [];
 }
@@ -431,7 +478,13 @@ export function getSessionLogsForUser(user: UserProfile | null): SessionLog[] {
     return allLogs.filter((l) => (l.branch_id || l.campus_id) === campus);
   }
   if (user.role === 'faculty') {
-    return allLogs.filter((l) => l.faculty_id === user.id);
+    const campus = user.branch_id || user.campus_id;
+    return allLogs.filter((l) => {
+      if (campus && (l.branch_id || l.campus_id) && (l.branch_id || l.campus_id) !== campus) {
+        return false;
+      }
+      return l.faculty_id === user.id;
+    });
   }
   if (user.role === 'student') {
     const allowedSubjects = getSubjectsForUser(user);
@@ -440,6 +493,387 @@ export function getSessionLogsForUser(user: UserProfile | null): SessionLog[] {
   }
   return [];
 }
+
+export function getTimetableForUser(user: UserProfile | null): TimetableEntry[] {
+  const allTimetable = getTimetable();
+  if (!user) return [];
+  if (user.role === 'admin') return allTimetable;
+  const campus = user.branch_id || user.campus_id;
+  if (user.role === 'campus_manager') {
+    return allTimetable.filter((t) => !campus || (t.branch_id || t.campus_id) === campus);
+  }
+  if (user.role === 'faculty') {
+    const mySubjects = getSubjectsForUser(user);
+    const mySubjectIds = new Set(mySubjects.map((s) => s.id));
+    return allTimetable.filter((t) => {
+      if (campus && (t.branch_id || t.campus_id) && (t.branch_id || t.campus_id) !== campus) {
+        return false;
+      }
+      return t.faculty_id === user.id || mySubjectIds.has(t.subject_id);
+    });
+  }
+  if (user.role === 'student') {
+    const allowedBatchIds = new Set(user.assigned_batch_ids || []);
+    return allTimetable.filter((t) => allowedBatchIds.has(t.batch_id));
+  }
+  return [];
+}
+
+export function saveOpportunities(opps: StudentOpportunity[]): void {
+  setItem(STORAGE_KEYS.OPPORTUNITIES, opps);
+  notifyListeners();
+}
+
+/**
+ * Filter opportunities for user with strict audience targeting and student publication status.
+ */
+export function getOpportunitiesForUser(user: UserProfile | null): StudentOpportunity[] {
+  const allOpps = getOpportunities();
+  if (!user) return [];
+  // Admins see all opportunities including drafts, unpublished, and archived
+  if (user.role === 'admin') return allOpps;
+
+  const userCampus = user.branch_id || user.campus_id;
+  const todayStr = formatDateYMD(new Date());
+
+  if (user.role === 'campus_manager' || user.role === 'faculty') {
+    return allOpps.filter((o) => {
+      if (o.status !== 'published' && o.status !== 'open') return false;
+      if (o.target_audience_scope === 'all_students') return true;
+      return !userCampus || !o.eligible_branches || o.eligible_branches.includes(userCampus as BranchId);
+    });
+  }
+
+  if (user.role === 'student') {
+    return allOpps.filter((o) => {
+      // 1. Publication status: Students ONLY see published/open opportunities
+      if (o.status !== 'published' && o.status !== 'open') {
+        return false;
+      }
+
+      // 2. Publication Date window checks
+      if (o.publication_start_date && todayStr < o.publication_start_date) {
+        return false;
+      }
+      if (o.publication_end_date && todayStr > o.publication_end_date) {
+        return false;
+      }
+
+      // 3. Audience Scope
+      if (o.target_audience_scope === 'all_students') {
+        return true;
+      }
+
+      // 4. Campus isolation
+      if (userCampus && o.eligible_branches && o.eligible_branches.length > 0) {
+        if (!o.eligible_branches.includes(userCampus as BranchId)) {
+          return false;
+        }
+      }
+
+      // 5. Track isolation
+      if (user.assigned_track && o.eligible_tracks && o.eligible_tracks.length > 0) {
+        if (!o.eligible_tracks.includes(user.assigned_track)) {
+          return false;
+        }
+      }
+
+      // 6. Batch eligibility
+      if (user.assigned_batch_ids && user.assigned_batch_ids.length > 0 && o.eligible_batch_ids && o.eligible_batch_ids.length > 0) {
+        const matchesBatch = o.eligible_batch_ids.some((b) => user.assigned_batch_ids?.includes(b));
+        if (!matchesBatch) return false;
+      }
+
+      return true;
+    });
+  }
+
+  return [];
+}
+
+/**
+ * Validates HTTP/HTTPS URL
+ */
+export function isValidOpportunityUrl(urlString?: string): boolean {
+  if (!urlString || typeof urlString !== 'string' || urlString.trim() === '') return false;
+  try {
+    const url = new URL(urlString.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Admin: Create or update an opportunity with URL validation and permission checks.
+ */
+export function createOrUpdateOpportunity(
+  oppData: Partial<StudentOpportunity>,
+  user: UserProfile | null
+): { success: boolean; opportunity?: StudentOpportunity; error?: string } {
+  if (!user || user.role !== 'admin') {
+    return {
+      success: false,
+      error: 'Unauthorized: Only institutional administrators can create or edit opportunities.',
+    };
+  }
+
+  // Required field validations
+  if (!oppData.title || oppData.title.trim() === '') {
+    return { success: false, error: 'Opportunity title is required.' };
+  }
+  if (!oppData.category) {
+    return { success: false, error: 'Category selection is required.' };
+  }
+  const organizer = oppData.organizer || oppData.organization;
+  if (!organizer || organizer.trim() === '') {
+    return { success: false, error: 'Organizer / Institution name is required.' };
+  }
+  const summary = oppData.short_summary || oppData.description;
+  if (!summary || summary.trim() === '') {
+    return { success: false, error: 'Short summary is required.' };
+  }
+  if (!oppData.official_url || oppData.official_url.trim() === '') {
+    return { success: false, error: 'Official verified external URL is required.' };
+  }
+
+  // URL security validation
+  if (!isValidOpportunityUrl(oppData.official_url)) {
+    return { success: false, error: 'Official URL must be a valid http:// or https:// web address.' };
+  }
+  if (oppData.apply_url && !isValidOpportunityUrl(oppData.apply_url)) {
+    return { success: false, error: 'Application URL must be a valid http:// or https:// web address.' };
+  }
+  if (oppData.source_url && !isValidOpportunityUrl(oppData.source_url)) {
+    return { success: false, error: 'Source URL must be a valid http:// or https:// web address.' };
+  }
+
+  const allOpps = getOpportunities();
+  const nowIso = new Date().toISOString();
+
+  let savedOpp: StudentOpportunity;
+
+  if (oppData.id) {
+    // Edit existing
+    const index = allOpps.findIndex((o) => o.id === oppData.id);
+    if (index === -1) {
+      return { success: false, error: 'Opportunity not found.' };
+    }
+    savedOpp = {
+      ...allOpps[index],
+      ...oppData,
+      organizer,
+      organization: organizer,
+      short_summary: summary,
+      full_description: oppData.full_description || summary,
+      description: oppData.full_description || summary,
+      updated_at: nowIso,
+      updated_by_id: user.id,
+      updated_by_name: user.name,
+    } as StudentOpportunity;
+    allOpps[index] = savedOpp;
+  } else {
+    // Create new
+    const newId = `opp-${oppData.category || 'misc'}-${Date.now()}`;
+    savedOpp = {
+      id: newId,
+      title: oppData.title.trim(),
+      slug: oppData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+      category: oppData.category,
+      type: oppData.category,
+      organizer: organizer.trim(),
+      organization: organizer.trim(),
+      short_summary: summary.trim(),
+      full_description: (oppData.full_description || summary).trim(),
+      description: (oppData.full_description || summary).trim(),
+      official_url: oppData.official_url.trim(),
+      apply_url: oppData.apply_url?.trim() || oppData.official_url.trim(),
+      source_url: oppData.source_url?.trim(),
+      last_verified_at: nowIso,
+      application_deadline: oppData.application_deadline || oppData.deadline,
+      deadline: oppData.application_deadline || oppData.deadline,
+      event_start_date: oppData.event_start_date,
+      event_end_date: oppData.event_end_date,
+      publication_start_date: oppData.publication_start_date || formatDateYMD(new Date()),
+      publication_end_date: oppData.publication_end_date,
+      delivery_format: oppData.delivery_format || 'online',
+      price_status: oppData.price_status || 'free',
+      stipend_or_reward: oppData.stipend_or_reward,
+      eligibility_requirements: oppData.eligibility_requirements || ['Open to undergraduate students'],
+      requirements: oppData.eligibility_requirements || ['Open to undergraduate students'],
+      eligibility_summary: oppData.eligibility_summary || 'Undergraduate students',
+      target_audience_scope: oppData.target_audience_scope || 'all_students',
+      eligible_branches: oppData.eligible_branches || ['Ghaziabad', 'Bangalore', 'Jaipur'],
+      location: oppData.location || 'Remote / Hybrid',
+      cover_image_url: oppData.cover_image_url,
+      featured: Boolean(oppData.featured),
+      status: oppData.status || 'published',
+      created_by_id: user.id,
+      created_by_name: user.name,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    allOpps.unshift(savedOpp);
+  }
+
+  saveOpportunities(allOpps);
+
+  logAudit(
+    'opportunity',
+    savedOpp.id,
+    oppData.id ? 'update' : 'create',
+    `${user.name} ${oppData.id ? 'updated' : 'published'} Opportunity: "${savedOpp.title}" (${savedOpp.category})`,
+    user
+  );
+
+  return { success: true, opportunity: savedOpp };
+}
+
+/**
+ * Admin: Archive an opportunity to preserve history without permanent deletion.
+ */
+export function archiveOpportunity(
+  opportunityId: string,
+  user: UserProfile | null
+): { success: boolean; error?: string } {
+  if (!user || user.role !== 'admin') {
+    return { success: false, error: 'Unauthorized: Only administrators can archive opportunities.' };
+  }
+
+  const allOpps = getOpportunities();
+  const index = allOpps.findIndex((o) => o.id === opportunityId);
+  if (index === -1) {
+    return { success: false, error: 'Opportunity not found.' };
+  }
+
+  allOpps[index] = {
+    ...allOpps[index],
+    status: 'archived',
+    updated_at: new Date().toISOString(),
+    updated_by_id: user.id,
+    updated_by_name: user.name,
+  };
+
+  saveOpportunities(allOpps);
+
+  logAudit(
+    'opportunity',
+    opportunityId,
+    'update',
+    `${user.name} archived Opportunity: "${allOpps[index].title}"`,
+    user
+  );
+
+  return { success: true };
+}
+
+/**
+ * Admin: Toggle opportunity publication status (published vs unpublished).
+ */
+export function toggleOpportunityStatus(
+  opportunityId: string,
+  newStatus: OpportunityPublicationStatus,
+  user: UserProfile | null
+): { success: boolean; error?: string } {
+  if (!user || user.role !== 'admin') {
+    return { success: false, error: 'Unauthorized: Only administrators can alter opportunity status.' };
+  }
+
+  const allOpps = getOpportunities();
+  const index = allOpps.findIndex((o) => o.id === opportunityId);
+  if (index === -1) {
+    return { success: false, error: 'Opportunity not found.' };
+  }
+
+  allOpps[index] = {
+    ...allOpps[index],
+    status: newStatus,
+    updated_at: new Date().toISOString(),
+    updated_by_id: user.id,
+    updated_by_name: user.name,
+  };
+
+  saveOpportunities(allOpps);
+
+  logAudit(
+    'opportunity',
+    opportunityId,
+    'update',
+    `${user.name} updated Opportunity status to "${newStatus}" for "${allOpps[index].title}"`,
+    user
+  );
+
+  return { success: true };
+}
+
+/**
+ * Admin: Toggle featured status for homepage/spotlight placement.
+ */
+export function toggleOpportunityFeatured(
+  opportunityId: string,
+  user: UserProfile | null
+): { success: boolean; featured?: boolean; error?: string } {
+  if (!user || user.role !== 'admin') {
+    return { success: false, error: 'Unauthorized: Only administrators can feature opportunities.' };
+  }
+
+  const allOpps = getOpportunities();
+  const index = allOpps.findIndex((o) => o.id === opportunityId);
+  if (index === -1) {
+    return { success: false, error: 'Opportunity not found.' };
+  }
+
+  allOpps[index] = {
+    ...allOpps[index],
+    featured: !allOpps[index].featured,
+    updated_at: new Date().toISOString(),
+    updated_by_id: user.id,
+    updated_by_name: user.name,
+  };
+
+  saveOpportunities(allOpps);
+
+  logAudit(
+    'opportunity',
+    opportunityId,
+    'update',
+    `${user.name} set featured=${allOpps[index].featured} for "${allOpps[index].title}"`,
+    user
+  );
+
+  return { success: true, featured: allOpps[index].featured };
+}
+
+export function getDailyLearningTestsForUser(user: UserProfile | null): DailyLearningTest[] {
+  const allTests = getDailyLearningTests();
+  if (!user) return [];
+  if (user.role === 'admin') return allTests;
+  const userCampus = user.branch_id || user.campus_id;
+
+  if (user.role === 'campus_manager') {
+    return allTests.filter((t) => !userCampus || t.branch_id === userCampus);
+  }
+
+  if (user.role === 'faculty') {
+    // Faculty can view test records for their assigned subjects in their campus
+    const mySubjects = getSubjectsForUser(user);
+    const subjectIds = new Set(mySubjects.map((s) => s.id));
+    return allTests.filter((t) => subjectIds.has(t.subject_id) && (!userCampus || t.branch_id === userCampus));
+  }
+
+  if (user.role === 'student') {
+    // Strictly isolate: student can ONLY see their own learning tests
+    return allTests.filter((t) => t.student_id === user.id);
+  }
+
+  return [];
+}
+
+export function getDailyLearningTestsBySubject(subjectId: string, user: UserProfile | null): DailyLearningTest[] {
+  const userTests = getDailyLearningTestsForUser(user);
+  return userTests.filter((t) => t.subject_id === subjectId);
+}
+
 
 // Current User session
 export function getCurrentUserId(): string {
@@ -1497,5 +1931,497 @@ export function reviewExtraClassRequest(
   }
 
   return { success: false, error: 'Invalid decision specified.' };
+}
+
+// ==========================================
+// 19. DAILY 5-MINUTE RECAP QUIZ SYSTEM
+// ==========================================
+
+export function getDailyRecapQuizzes(): DailyRecapQuiz[] {
+  return getItem(STORAGE_KEYS.DAILY_RECAP_QUIZZES, INITIAL_DAILY_RECAP_QUIZZES);
+}
+
+export function saveDailyRecapQuizzes(quizzes: DailyRecapQuiz[]): void {
+  setItem(STORAGE_KEYS.DAILY_RECAP_QUIZZES, quizzes);
+  notifyListeners();
+}
+
+export function getStudentQuizAttempts(): StudentQuizAttempt[] {
+  return getItem(STORAGE_KEYS.STUDENT_QUIZ_ATTEMPTS, INITIAL_STUDENT_QUIZ_ATTEMPTS);
+}
+
+export function saveStudentQuizAttempts(attempts: StudentQuizAttempt[]): void {
+  setItem(STORAGE_KEYS.STUDENT_QUIZ_ATTEMPTS, attempts);
+  notifyListeners();
+}
+
+/**
+ * Fetch today's recap quiz for a student with answers safely stripped.
+ * Returns null if no approved quiz exists for today.
+ */
+export function getDailyRecapQuizForStudent(
+  user: UserProfile | null,
+  targetDate?: string
+): { quiz: StudentRecapQuizView | null; attempt: StudentQuizAttempt | null } {
+  if (!user || user.role !== 'student') {
+    return { quiz: null, attempt: null };
+  }
+
+  const studentBatchId = user.assigned_batch_ids?.[0];
+  const studentBranch = user.branch_id || user.campus_id;
+  const dateToUse = targetDate || '2026-10-19';
+
+  const allQuizzes = getDailyRecapQuizzes();
+  // Match published quiz for the student's batch and campus for the date
+  const matchedQuiz = allQuizzes.find((q) => {
+    if (q.status !== 'published') return false;
+    if (q.date !== dateToUse) return false;
+    if (q.batch_id && studentBatchId) {
+      return q.batch_id === studentBatchId;
+    }
+    if (q.branch_id && studentBranch) {
+      return q.branch_id === studentBranch;
+    }
+    return false;
+  });
+
+  if (!matchedQuiz) {
+    return { quiz: null, attempt: null };
+  }
+
+  // SECURITY: Strip correct_option_index and explanation before sending to student!
+  const safeQuestions: StudentRecapQuestion[] = matchedQuiz.questions.map((q) => ({
+    id: q.id,
+    quiz_id: q.quiz_id,
+    question_text: q.question_text,
+    options: q.options,
+    subject_id: q.subject_id,
+    topic_id: q.topic_id,
+    topic_title: q.topic_title,
+    difficulty: q.difficulty,
+    question_type: q.question_type,
+  }));
+
+  const studentQuizView: StudentRecapQuizView = {
+    id: matchedQuiz.id,
+    title: matchedQuiz.title,
+    subject_id: matchedQuiz.subject_id,
+    subject_name: matchedQuiz.subject_name,
+    subject_code: matchedQuiz.subject_code,
+    branch_id: matchedQuiz.branch_id,
+    batch_id: matchedQuiz.batch_id,
+    academic_track: matchedQuiz.academic_track,
+    date: matchedQuiz.date,
+    estimated_minutes: matchedQuiz.estimated_minutes || 5,
+    total_questions: safeQuestions.length,
+    questions: safeQuestions,
+  };
+
+  const allAttempts = getStudentQuizAttempts();
+  const existingAttempt =
+    allAttempts.find((a) => a.student_id === user.id && a.quiz_id === matchedQuiz.id) || null;
+
+  return { quiz: studentQuizView, attempt: existingAttempt };
+}
+
+/**
+ * Start or resume a student quiz attempt.
+ */
+export function startOrResumeQuizAttempt(
+  quizId: string,
+  user: UserProfile
+): { attempt: StudentQuizAttempt; error?: string } {
+  if (user.role !== 'student') {
+    return { attempt: null as any, error: 'Only enrolled students may take daily recaps.' };
+  }
+
+  const allQuizzes = getDailyRecapQuizzes();
+  const quiz = allQuizzes.find((q) => q.id === quizId && q.status === 'published');
+  if (!quiz) {
+    return { attempt: null as any, error: 'Quiz not found or not published.' };
+  }
+
+  // Campus & Batch verification
+  const studentBranch = user.branch_id || user.campus_id;
+  const studentBatchId = user.assigned_batch_ids?.[0];
+  if (quiz.branch_id && studentBranch && quiz.branch_id !== studentBranch) {
+    return { attempt: null as any, error: 'Access denied: Quiz belongs to another campus.' };
+  }
+  if (quiz.batch_id && studentBatchId && quiz.batch_id !== studentBatchId) {
+    return { attempt: null as any, error: 'Access denied: Quiz belongs to another batch.' };
+  }
+
+  const allAttempts = getStudentQuizAttempts();
+  const existing = allAttempts.find((a) => a.student_id === user.id && a.quiz_id === quizId);
+  if (existing) {
+    return { attempt: existing };
+  }
+
+  const newAttempt: StudentQuizAttempt = {
+    id: `att-${user.id}-${quiz.id}-${Date.now()}`,
+    quiz_id: quiz.id,
+    student_id: user.id,
+    student_name: user.name,
+    batch_id: quiz.batch_id,
+    branch_id: quiz.branch_id,
+    subject_id: quiz.subject_id,
+    date: quiz.date,
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    answers: {},
+  };
+
+  saveStudentQuizAttempts([...allAttempts, newAttempt]);
+  return { attempt: newAttempt };
+}
+
+/**
+ * Save in-progress answers safely for interrupted attempts.
+ */
+export function saveQuizAttemptProgress(
+  attemptId: string,
+  answers: Record<string, number>,
+  user: UserProfile
+): { success: boolean; attempt?: StudentQuizAttempt; error?: string } {
+  const allAttempts = getStudentQuizAttempts();
+  const index = allAttempts.findIndex((a) => a.id === attemptId);
+  if (index === -1) {
+    return { success: false, error: 'Attempt not found.' };
+  }
+
+  const attempt = allAttempts[index];
+  if (attempt.student_id !== user.id) {
+    return { success: false, error: 'Unauthorized attempt access.' };
+  }
+
+  // If already completed, do not overwrite answers
+  if (attempt.status === 'completed') {
+    return { success: true, attempt };
+  }
+
+  const updated: StudentQuizAttempt = {
+    ...attempt,
+    answers: { ...attempt.answers, ...answers },
+  };
+
+  allAttempts[index] = updated;
+  saveStudentQuizAttempts([...allAttempts]);
+  return { success: true, attempt: updated };
+}
+
+/**
+ * Server-side submission and score calculation.
+ * Prevents duplicate attempts, validates answers against master quiz,
+ * produces question results and weak topics for revision.
+ */
+export function submitQuizAttempt(
+  attemptId: string,
+  answers: Record<string, number>,
+  user: UserProfile
+): { success: boolean; attempt?: StudentQuizAttempt; error?: string } {
+  const allAttempts = getStudentQuizAttempts();
+  const index = allAttempts.findIndex((a) => a.id === attemptId);
+  if (index === -1) {
+    return { success: false, error: 'Attempt not found.' };
+  }
+
+  const attempt = allAttempts[index];
+  if (attempt.student_id !== user.id) {
+    return { success: false, error: 'Unauthorized to submit this attempt.' };
+  }
+
+  // Prevent duplicate submission: if already completed, return existing result
+  if (attempt.status === 'completed') {
+    return { success: true, attempt };
+  }
+
+  const allQuizzes = getDailyRecapQuizzes();
+  const masterQuiz = allQuizzes.find((q) => q.id === attempt.quiz_id);
+  if (!masterQuiz) {
+    return { success: false, error: 'Master quiz record not found for scoring.' };
+  }
+
+  const mergedAnswers = { ...attempt.answers, ...answers };
+  let correctCount = 0;
+  const questionResults: QuestionResultItem[] = [];
+  const weakTopics: DailyLearningTestWeakTopic[] = [];
+
+  for (const q of masterQuiz.questions) {
+    const selectedIndex = mergedAnswers[q.id];
+    const isCorrect = selectedIndex !== undefined && selectedIndex === q.correct_option_index;
+    if (isCorrect) {
+      correctCount++;
+    }
+
+    questionResults.push({
+      question_id: q.id,
+      question_text: q.question_text,
+      options: q.options,
+      selected_option_index: selectedIndex !== undefined ? selectedIndex : -1,
+      correct_option_index: q.correct_option_index,
+      is_correct: isCorrect,
+      explanation: q.explanation,
+      topic_id: q.topic_id,
+      topic_title: q.topic_title,
+    });
+
+    if (!isCorrect && q.topic_id) {
+      weakTopics.push({
+        topic_id: q.topic_id,
+        topic_title: q.topic_title || 'Syllabus Topic',
+        concept: `Concept review needed for ${q.question_text.slice(0, 70)}...`,
+        recommended_reading: `Review lecture notes and syllabus objectives for ${q.topic_title || 'this topic'}.`,
+      });
+    }
+  }
+
+  const totalQuestions = masterQuiz.questions.length;
+  const percentage = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+  const nowIso = new Date().toISOString();
+
+  const completedAttempt: StudentQuizAttempt = {
+    ...attempt,
+    answers: mergedAnswers,
+    status: 'completed',
+    completed_at: nowIso,
+    score: correctCount,
+    total_questions: totalQuestions,
+    percentage,
+    question_results: questionResults,
+    weak_topics: weakTopics,
+  };
+
+  allAttempts[index] = completedAttempt;
+  saveStudentQuizAttempts([...allAttempts]);
+
+  // Sync to Daily Learning Tests for academic progression & AI assistant analytics
+  const allTests = getDailyLearningTests();
+  const existingTestIndex = allTests.findIndex(
+    (t) => t.student_id === user.id && t.date === masterQuiz.date && t.subject_id === masterQuiz.subject_id
+  );
+
+  const testStatus: 'passed' | 'needs_revision' | 'excellent' =
+    percentage >= 80 ? 'excellent' : percentage >= 60 ? 'passed' : 'needs_revision';
+
+  const newTestRecord: DailyLearningTest = {
+    id: `dlt-${user.id}-${masterQuiz.id}`,
+    student_id: user.id,
+    student_name: user.name,
+    batch_id: masterQuiz.batch_id,
+    branch_id: masterQuiz.branch_id,
+    subject_id: masterQuiz.subject_id,
+    subject_name: masterQuiz.subject_name,
+    date: masterQuiz.date,
+    topic_ids: masterQuiz.questions.map((q) => q.topic_id).filter(Boolean) as string[],
+    topic_titles: masterQuiz.questions.map((q) => q.topic_title).filter(Boolean) as string[],
+    total_questions: totalQuestions,
+    score: correctCount,
+    percentage,
+    status: testStatus,
+    weak_topics: weakTopics,
+  };
+
+  if (existingTestIndex >= 0) {
+    allTests[existingTestIndex] = newTestRecord;
+  } else {
+    allTests.unshift(newTestRecord);
+  }
+  setItem(STORAGE_KEYS.DAILY_LEARNING_TESTS, allTests);
+
+  logAudit(
+    'daily_recap',
+    completedAttempt.id,
+    'create',
+    `${user.name} completed Daily 5-Minute Recap for ${masterQuiz.subject_name} with score ${correctCount}/${totalQuestions} (${percentage}%)`,
+    user
+  );
+
+  return { success: true, attempt: completedAttempt };
+}
+
+/**
+ * Returns performance history and topic-level weak spots for a student.
+ */
+export function getStudentRecapHistory(user: UserProfile | null): {
+  attempts: StudentQuizAttempt[];
+  stats: {
+    completedCount: number;
+    averageScore: number;
+    averagePercentage: number;
+    weakTopics: DailyLearningTestWeakTopic[];
+  };
+} {
+  if (!user || user.role !== 'student') {
+    return {
+      attempts: [],
+      stats: { completedCount: 0, averageScore: 0, averagePercentage: 0, weakTopics: [] },
+    };
+  }
+
+  const allAttempts = getStudentQuizAttempts();
+  const completedAttempts = allAttempts
+    .filter((a) => a.student_id === user.id && a.status === 'completed')
+    .sort((a, b) => (b.completed_at || b.date).localeCompare(a.completed_at || a.date));
+
+  const completedCount = completedAttempts.length;
+  const totalScore = completedAttempts.reduce((sum, a) => sum + (a.score || 0), 0);
+  const totalPct = completedAttempts.reduce((sum, a) => sum + (a.percentage || 0), 0);
+
+  const averageScore = completedCount > 0 ? Number((totalScore / completedCount).toFixed(1)) : 0;
+  const averagePercentage = completedCount > 0 ? Math.round(totalPct / completedCount) : 0;
+
+  // Deduplicate weak topics
+  const weakTopicMap = new Map<string, DailyLearningTestWeakTopic>();
+  completedAttempts.forEach((a) => {
+    (a.weak_topics || []).forEach((w) => {
+      if (w.topic_id && !weakTopicMap.has(w.topic_id)) {
+        weakTopicMap.set(w.topic_id, w);
+      }
+    });
+  });
+
+  return {
+    attempts: completedAttempts,
+    stats: {
+      completedCount,
+      averageScore,
+      averagePercentage,
+      weakTopics: Array.from(weakTopicMap.values()),
+    },
+  };
+}
+
+/**
+ * Returns quizzes visible to faculty/staff based on role and campus.
+ */
+export function getQuizzesForFaculty(user: UserProfile | null): DailyRecapQuiz[] {
+  const allQuizzes = getDailyRecapQuizzes();
+  if (!user) return [];
+  if (user.role === 'admin') return allQuizzes;
+
+  const userCampus = user.branch_id || user.campus_id;
+
+  if (user.role === 'campus_manager') {
+    return allQuizzes.filter((q) => !userCampus || q.branch_id === userCampus);
+  }
+
+  if (user.role === 'faculty') {
+    const mySubjects = getSubjectsForUser(user);
+    const subjectIds = new Set(mySubjects.map((s) => s.id));
+    return allQuizzes.filter(
+      (q) => subjectIds.has(q.subject_id) && (!userCampus || q.branch_id === userCampus)
+    );
+  }
+
+  return [];
+}
+
+/**
+ * Create or update a daily recap quiz with faculty permission validation.
+ */
+export function createOrUpdateDailyRecapQuiz(
+  quizData: Partial<DailyRecapQuiz>,
+  user: UserProfile
+): { success: boolean; quiz?: DailyRecapQuiz; error?: string } {
+  if (user.role !== 'faculty' && user.role !== 'admin' && user.role !== 'campus_manager') {
+    return { success: false, error: 'Unauthorized: Only faculty and academic staff can manage quizzes.' };
+  }
+
+  // Validate subject assignment if faculty
+  if (user.role === 'faculty') {
+    if (!quizData.subject_id) {
+      return { success: false, error: 'Subject is required.' };
+    }
+    const mySubjects = getSubjectsForUser(user);
+    const authorized = mySubjects.some((s) => s.id === quizData.subject_id);
+    if (!authorized) {
+      return { success: false, error: 'Faculty is not authorized to create quizzes for this subject.' };
+    }
+  }
+
+  // Validate questions
+  const questions = quizData.questions || [];
+  if (questions.length === 0) {
+    return { success: false, error: 'A daily recap quiz must have at least 1 question (recommended: 5).' };
+  }
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    if (!q.question_text || q.question_text.trim() === '') {
+      return { success: false, error: `Question ${i + 1} is missing question text.` };
+    }
+    if (!Array.isArray(q.options) || q.options.length !== 4) {
+      return { success: false, error: `Question ${i + 1} must have exactly 4 answer options.` };
+    }
+    if (q.options.some((opt) => !opt || opt.trim() === '')) {
+      return { success: false, error: `Question ${i + 1} has blank answer options.` };
+    }
+    if (typeof q.correct_option_index !== 'number' || q.correct_option_index < 0 || q.correct_option_index > 3) {
+      return { success: false, error: `Question ${i + 1} has an invalid correct option index.` };
+    }
+    if (!q.explanation || q.explanation.trim() === '') {
+      return { success: false, error: `Question ${i + 1} requires an explanation for the correct answer.` };
+    }
+  }
+
+  const allQuizzes = getDailyRecapQuizzes();
+  const nowIso = new Date().toISOString();
+
+  let savedQuiz: DailyRecapQuiz;
+
+  if (quizData.id) {
+    // Edit existing quiz
+    const index = allQuizzes.findIndex((q) => q.id === quizData.id);
+    if (index === -1) {
+      return { success: false, error: 'Quiz not found.' };
+    }
+    savedQuiz = {
+      ...allQuizzes[index],
+      ...quizData,
+      questions: questions.map((q, idx) => ({
+        ...q,
+        id: q.id || `q-${quizData.id}-${idx + 1}`,
+        quiz_id: quizData.id!,
+      })),
+    } as DailyRecapQuiz;
+    allQuizzes[index] = savedQuiz;
+  } else {
+    // Create new quiz
+    const newId = `quiz-${quizData.branch_id?.toLowerCase() || 'rec'}-${Date.now()}`;
+    savedQuiz = {
+      id: newId,
+      title: quizData.title || 'Daily 5-Minute Recap',
+      subject_id: quizData.subject_id!,
+      subject_name: quizData.subject_name || 'Assigned Course',
+      subject_code: quizData.subject_code || 'MSOT',
+      branch_id: quizData.branch_id || (user.branch_id as BranchId),
+      batch_id: quizData.batch_id || '',
+      academic_track: quizData.academic_track || 'Mirai Track',
+      date: quizData.date || '2026-10-19',
+      estimated_minutes: quizData.estimated_minutes || 5,
+      status: quizData.status || 'published',
+      created_by_faculty_id: user.id,
+      faculty_name: user.name,
+      created_at: nowIso,
+      questions: questions.map((q, idx) => ({
+        ...q,
+        id: `q-${newId}-${idx + 1}`,
+        quiz_id: newId,
+      })),
+    };
+    allQuizzes.unshift(savedQuiz);
+  }
+
+  saveDailyRecapQuizzes(allQuizzes);
+
+  logAudit(
+    'daily_recap',
+    savedQuiz.id,
+    quizData.id ? 'update' : 'create',
+    `${user.name} published Daily 5-Minute Recap: "${savedQuiz.title}" for ${savedQuiz.subject_name}`,
+    user
+  );
+
+  return { success: true, quiz: savedQuiz };
 }
 

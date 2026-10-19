@@ -38,9 +38,11 @@ import {
   ExternalLink,
   Zap,
   FileSpreadsheet,
+  Sparkles,
 } from 'lucide-react';
 
 import { AccessDenied } from '../common/AccessDenied';
+import { AdminOpportunitiesManager } from './AdminOpportunitiesManager';
 
 export const AdminManagement: React.FC = () => {
   const { currentUser, isAdmin, reSyncDatabase } = useAuth();
@@ -50,7 +52,7 @@ export const AdminManagement: React.FC = () => {
   }
 
   const [activeTab, setActiveTab] = useState<
-    'backend' | 'csv' | 'branches' | 'tracks' | 'batches' | 'subjects' | 'faculty' | 'users'
+    'backend' | 'opportunities' | 'csv' | 'branches' | 'tracks' | 'batches' | 'subjects' | 'faculty' | 'users'
   >('backend');
 
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
@@ -159,6 +161,7 @@ export const AdminManagement: React.FC = () => {
         <div className="flex items-center gap-2 mt-6 pt-2 border-t border-[#EFE8DC]/80 overflow-x-auto">
           {[
             { id: 'backend', label: 'Storage & Diagnostics', icon: Database },
+            { id: 'opportunities', label: 'Opportunities Hub', icon: Sparkles },
             { id: 'csv', label: 'CSV Bulk Ingestion', icon: FileSpreadsheet },
             { id: 'branches', label: 'Branches (3)', icon: Building2 },
             { id: 'tracks', label: 'Tracks (2)', icon: Layers },
@@ -181,6 +184,9 @@ export const AdminManagement: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* OPPORTUNITIES MANAGEMENT TAB */}
+      {activeTab === 'opportunities' && <AdminOpportunitiesManager />}
 
       {/* CSV IMPORTER TAB */}
       {activeTab === 'csv' && <CsvImporter />}

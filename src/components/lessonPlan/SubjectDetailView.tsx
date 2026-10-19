@@ -21,6 +21,7 @@ import {
   TopicStatus,
   ProgressionStatus,
 } from '../../types';
+import { canFacultyModifySubject } from '../../services/authService';
 import {
   calculateHoursInScope,
   calculateCoveredHours,
@@ -63,7 +64,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
   subjectId,
   onBack,
 }) => {
-  const { currentUser, canEditLessonPlan, isStudent } = useAuth();
+  const { currentUser, isStudent } = useAuth();
 
   const subjects = getSubjects();
   const allUnits = getUnits();
@@ -75,6 +76,10 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
   const sessionLogs = getSessionLogs();
 
   const subject = subjects.find((s) => s.id === subjectId) || subjects[0];
+  const isAuthorizedToEdit = useMemo(() => {
+    if (!currentUser) return false;
+    return canFacultyModifySubject(currentUser, subject);
+  }, [currentUser, subject]);
   const subjectUnits = allUnits
     .filter((u) => u.subject_id === subject?.id)
     .sort((a, b) => a.unit_number - b.unit_number);
@@ -171,7 +176,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
   };
 
   const handleUpdateTopicStatus = (topicId: string, newStatus: TopicStatus) => {
-    if (!currentUser || !canEditLessonPlan) return;
+    if (!currentUser || !isAuthorizedToEdit) return;
     const newPct = newStatus === 'completed' ? 100 : newStatus === 'not_started' || newStatus === 'skipped' ? 0 : 50;
     updateTopic(
       topicId,
@@ -186,7 +191,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
   };
 
   const handleUpdateTopicPct = (topicId: string, pct: number) => {
-    if (!currentUser || !canEditLessonPlan) return;
+    if (!currentUser || !isAuthorizedToEdit) return;
     const newStatus: TopicStatus = pct >= 100 ? 'completed' : pct > 0 ? 'in_progress' : 'not_started';
     updateTopic(
       topicId,
@@ -200,7 +205,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
   };
 
   const handleToggleExamScope = (topicId: string, currentVal: boolean) => {
-    if (!currentUser || !canEditLessonPlan) return;
+    if (!currentUser || !isAuthorizedToEdit) return;
     updateTopic(topicId, { in_exam_scope: !currentVal }, currentUser);
     showNotice('Updated exam scope for topic.');
   };
@@ -213,7 +218,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
 
   const handleCreateTopicSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !canEditLessonPlan) return;
+    if (!currentUser || !isAuthorizedToEdit) return;
     const unitId = selectedUnitIdForTopic || subjectUnits[0]?.id;
     if (!unitId) return;
 
@@ -239,7 +244,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
 
   const handleCreateUnitSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !canEditLessonPlan) return;
+    if (!currentUser || !isAuthorizedToEdit) return;
 
     createUnit(
       {
@@ -430,8 +435,8 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
               </div>
             </div>
 
-            {/* Action buttons (Only for faculty / managers / admin) */}
-            {canEditLessonPlan && (
+            {/* Action buttons (Only for authorized faculty / managers / admin) */}
+            {isAuthorizedToEdit && (
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -660,7 +665,7 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
                       )}
                     </div>
 
-                    {canEditLessonPlan && (
+                    {isAuthorizedToEdit && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -795,8 +800,8 @@ export const SubjectDetailView: React.FC<SubjectDetailViewProps> = ({
                               )}
                             </div>
 
-                            {/* Faculty Actions & Progress Slider (Read-only for students) */}
-                            {canEditLessonPlan && (
+                            {/* Faculty Actions & Progress Slider (Read-only for students or non-authorized faculty) */}
+                            {isAuthorizedToEdit && (
                               <div className="flex items-center gap-3 pl-7 md:pl-0 shrink-0">
                                 {/* Completion range slider */}
                                 <div className="flex items-center gap-1.5">

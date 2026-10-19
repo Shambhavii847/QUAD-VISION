@@ -48,7 +48,7 @@ export const CalendarTimetable: React.FC = () => {
   const branches = getBranches();
 
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
-  const initialBranch: BranchId = isCampusManager && userAssignedBranch ? userAssignedBranch : (userAssignedBranch || 'Ghaziabad');
+  const initialBranch: BranchId = !isAdmin && userAssignedBranch ? userAssignedBranch : (userAssignedBranch || 'Ghaziabad');
 
   const [selectedBranch, setSelectedBranch] = useState<BranchId>(initialBranch);
   const [selectedTrack, setSelectedTrack] = useState<AcademicTrackId>(
@@ -56,10 +56,10 @@ export const CalendarTimetable: React.FC = () => {
   );
 
   useEffect(() => {
-    if (isCampusManager && userAssignedBranch) {
+    if (!isAdmin && userAssignedBranch) {
       setSelectedBranch(userAssignedBranch);
     }
-  }, [currentUser, isCampusManager, userAssignedBranch]);
+  }, [currentUser, isAdmin, userAssignedBranch]);
 
   const semesters = getSemesters();
   const holidays = getHolidays();
@@ -282,10 +282,10 @@ export const CalendarTimetable: React.FC = () => {
             <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-[#FAF7F0] border border-[#EFE8DC] text-xs">
               <Building2 className="w-3.5 h-3.5 text-[#71695F]" />
               <span className="font-medium text-[#71695F]">Branch:</span>
-              {isCampusManager ? (
+              {!isAdmin ? (
                 <div className="flex items-center gap-1.5 font-semibold text-[#1C1917]">
                   <span>{selectedBranch}</span>
-                  <Lock className="w-3 h-3 text-[#B08800]" />
+                  {isCampusManager && <Lock className="w-3 h-3 text-[#B08800]" />}
                 </div>
               ) : (
                 <select

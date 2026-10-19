@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../services/authContext';
 import {
   getSubjects,
+  getSubjectsForUser,
   getBatches,
+  getBatchesForUser,
   getTopics,
   getTimetable,
   saveSessionLog,
@@ -36,22 +38,38 @@ export const SessionLoggingModal: React.FC<SessionLoggingModalProps> = ({
   onClose,
   preselectedSlot,
 }) => {
-  const { currentUser } = useAuth();
-  const subjects = getSubjects();
-  const batches = getBatches();
+  const { currentUser, isAdmin } = useAuth();
+  const allSubjects = getSubjects();
+  const allBatches = getBatches();
   const allTopics = getTopics();
   const timetable = getTimetable();
-
   const branches = getBranches();
 
-  const [campusId, setCampusId] = useState<CampusId>(
-    currentUser?.branch_id || currentUser?.campus_id || 'Ghaziabad'
-  );
-  const [batchId, setBatchId] = useState(preselectedSlot?.batch_id || batches[0]?.id || '');
+  const userCampus = (currentUser?.branch_id || currentUser?.campus_id || 'Ghaziabad') as CampusId;
+  const [campusId, setCampusId] = useState<CampusId>(userCampus);
+
+  useEffect(() => {
+    if (!isAdmin && userCampus) {
+      setCampusId(userCampus);
+    }
+  }, [isAdmin, userCampus]);
+
+  const availableBatches = useMemo(() => {
+    if (!currentUser || isAdmin) return allBatches;
+    const userBatches = getBatchesForUser(currentUser);
+    return userBatches.length > 0 ? userBatches : allBatches.filter((b) => (b.branch_id || b.campus_id) === campusId);
+  }, [allBatches, currentUser, isAdmin, campusId]);
+
+  const availableSubjects = useMemo(() => {
+    if (!currentUser || isAdmin) return allSubjects;
+    return getSubjectsForUser(currentUser);
+  }, [allSubjects, currentUser, isAdmin]);
+
+  const [batchId, setBatchId] = useState(preselectedSlot?.batch_id || availableBatches[0]?.id || '');
   const [subjectId, setSubjectId] = useState(
     preselectedSlot?.subject_id ||
       currentUser?.assigned_subject_ids?.[0] ||
-      subjects[0]?.id ||
+      availableSubjects[0]?.id ||
       ''
   );
   const [scheduledClassId, setScheduledClassId] = useState(preselectedSlot?.id || '');
@@ -78,8 +96,12 @@ export const SessionLoggingModal: React.FC<SessionLoggingModalProps> = ({
   // Filter topics for the chosen subject
   const subjectTopics = allTopics.filter((t) => t.subject_id === subjectId);
 
-  // Filter timetable slots for the subject
-  const availableSlots = timetable.filter((t) => t.subject_id === subjectId);
+  // Filter timetable slots for the subject and faculty
+  const availableSlots = useMemo(() => {
+    return timetable.filter(
+      (t) => t.subject_id === subjectId && (isAdmin || !currentUser || t.faculty_id === currentUser.id)
+    );
+  }, [timetable, subjectId, isAdmin, currentUser]);
 
   const handleToggleTopic = (topicId: string, defaultPct: number = 100) => {
     const existing = selectedTopicProgress.find((p) => p.topic_id === topicId);
@@ -210,25 +232,33 @@ export const SessionLoggingModal: React.FC<SessionLoggingModalProps> = ({
             <label className="block font-medium text-[#1C1917] mb-1">
               Campus / Branch
             </label>
-            <select
-              value={campusId}
-              onChange={(e) => setCampusId(e.target.value as CampusId)}
-              className="w-full px-3 py-2 rounded-xl border border-[#EFE8DC] bg-[#FAF7F0] font-medium text-[#1C1917]"
-            >
-              <optgroup label="Branches">
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} ({b.university_short_name})
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Legacy Campuses">
-                <option value="HI-Tech">HI-Tech (Hyderabad)</option>
-                <option value="Ratnam">Ratnam (Bangalore)</option>
-                <option value="RGIB">RGIB (Pune)</option>
-                <option value="JUJ">JUJ (Noida)</option>
-              </optgroup>
-            </select>
+            {!isAdmin ? (
+              <div className="w-full px-3 py-2 rounded-xl border border-[#EFE8DC] bg-[#FAF7F0] font-semibold text-[#1C1917] truncate">
+                {branches.find((b) => b.id === campusId)?.name || campusId}
+                {branches.find((b) => b.id === campusId)?.university_short_name &&
+                  ` (${branches.find((b) => b.id === campusId)?.university_short_name})`}
+              </div>
+            ) : (
+              <select
+                value={campusId}
+                onChange={(e) => setCampusId(e.target.value as CampusId)}
+                className="w-full px-3 py-2 rounded-xl border border-[#EFE8DC] bg-[#FAF7F0] font-medium text-[#1C1917]"
+              >
+                <optgroup label="Branches">
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.university_short_name})
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Legacy Campuses">
+                  <option value="HI-Tech">HI-Tech (Hyderabad)</option>
+                  <option value="Ratnam">Ratnam (Bangalore)</option>
+                  <option value="RGIB">RGIB (Pune)</option>
+                  <option value="JUJ">JUJ (Noida)</option>
+                </optgroup>
+              </select>
+            )}
           </div>
 
           <div>
@@ -240,7 +270,7 @@ export const SessionLoggingModal: React.FC<SessionLoggingModalProps> = ({
               onChange={(e) => setBatchId(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-[#EFE8DC] bg-[#FAF7F0] font-medium text-[#1C1917]"
             >
-              {batches.map((b) => (
+              {availableBatches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name} ({b.academic_track})
                 </option>
@@ -257,7 +287,7 @@ export const SessionLoggingModal: React.FC<SessionLoggingModalProps> = ({
               onChange={(e) => setSubjectId(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-[#EFE8DC] bg-[#FAF7F0] font-medium text-[#1C1917]"
             >
-              {subjects.map((s) => (
+              {availableSubjects.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.code}: {s.name}
                 </option>

@@ -6,6 +6,7 @@ import {
   getSubjectsForUser,
   getExaminationsForUser,
   getTopics,
+  getOpportunitiesForUser,
 } from '../../services/storage';
 import {
   calculateHoursInScope,
@@ -26,6 +27,7 @@ import {
   Code,
   Check,
 } from 'lucide-react';
+import { DailyRecapCard } from './DailyRecapCard';
 
 export const StudentPortal: React.FC = () => {
   const { currentUser } = useAuth();
@@ -57,6 +59,9 @@ export const StudentPortal: React.FC = () => {
 
   // Upcoming examinations for this batch
   const batchExams = examinations.filter((e) => e.batch_id === enrolledBatch?.id);
+
+  // Optional preview of curated opportunities
+  const previewOpportunities = getOpportunitiesForUser(currentUser).slice(0, 2);
 
   return (
     <div className="space-y-6">
@@ -91,6 +96,9 @@ export const StudentPortal: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Daily 5-Minute Recap Section */}
+      <DailyRecapCard />
 
       {/* Enrolled Subjects Overview Cards */}
       <div className="space-y-2">
@@ -306,6 +314,55 @@ export const StudentPortal: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Optional Preview of Upcoming Opportunities */}
+      {previewOpportunities.length > 0 && (
+        <div className="bg-white rounded-3xl p-5 sm:p-6 border border-[#EFE8DC] shadow-2xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#C4841D]" />
+              <h3 className="font-semibold text-sm text-[#1C1917]">
+                Curated Opportunities Spotlight
+              </h3>
+            </div>
+            <Link
+              to="/opportunities"
+              className="text-xs font-semibold text-[#8C5E00] hover:text-[#1C1917] flex items-center gap-1 transition-colors"
+            >
+              <span>Explore Opportunities Hub</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {previewOpportunities.map((opp) => (
+              <Link
+                key={opp.id}
+                to="/opportunities"
+                className="p-3.5 rounded-2xl bg-[#FAF7F0] hover:bg-[#F7EFE1] border border-[#EFE8DC] flex items-center justify-between text-xs transition-colors group"
+              >
+                <div className="min-w-0 pr-3">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] font-bold px-2 py-0.2 rounded-full bg-white text-[#71695F] border border-[#EFE8DC]">
+                      {opp.category.replace(/_/g, ' ')}
+                    </span>
+                    {opp.application_deadline && (
+                      <span className="text-[10px] text-[#71695F] flex items-center gap-0.5">
+                        <Clock className="w-2.5 h-2.5 text-[#C4841D]" />
+                        {opp.application_deadline.split('T')[0]}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="font-bold text-[#1C1917] text-xs truncate group-hover:text-[#8C5E00] transition-colors">
+                    {opp.title}
+                  </h4>
+                  <p className="text-[11px] text-[#71695F] truncate">{opp.organizer || opp.organization}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#9C9387] group-hover:text-[#1C1917] group-hover:translate-x-0.5 transition-all shrink-0" />
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

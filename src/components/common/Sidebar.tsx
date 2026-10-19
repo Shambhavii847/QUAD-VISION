@@ -13,6 +13,7 @@ import {
   TrendingUp,
   X,
   LogOut,
+  Sparkles,
 } from 'lucide-react';
 import { getMissedSessions } from '../../services/storage';
 
@@ -37,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
   // Role-segmented navigation lists
   const studentItems = [
     { to: '/student', label: 'My Academics', icon: UserCheck, visible: true },
+    { to: '/opportunities', label: 'Opportunities', icon: Sparkles, visible: true },
     { to: '/calendar', label: 'My Calendar', icon: CalendarDays, visible: true },
     { to: '/lesson-plan', label: 'Learning Library', icon: BookOpen, visible: true },
     { to: '/exams', label: 'Exam Schedule', icon: GraduationCap, visible: true },
@@ -69,6 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
 
   const adminToolsItems = [
     { to: '/student', label: 'Student Portal', icon: UserCheck, visible: true },
+    { to: '/opportunities', label: 'Opportunities Hub', icon: Sparkles, visible: true },
     { to: '/campus-manager', label: 'Escalations', icon: Building2, badgeCount: escalatedCount > 0 ? escalatedCount : undefined, visible: true },
     { to: '/admin', label: 'Admin Console', icon: Settings, visible: true },
   ];

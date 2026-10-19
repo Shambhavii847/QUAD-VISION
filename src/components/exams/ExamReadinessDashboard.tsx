@@ -2,7 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   getBranches,
   getExaminations,
+  getExaminationsForUser,
   getSubjects,
+  getSubjectsForUser,
   getTopics,
   getSemesters,
   getHolidays,
@@ -33,23 +35,31 @@ import {
 } from 'lucide-react';
 
 export const ExamReadinessDashboard: React.FC = () => {
-  const { currentUser, isAdmin, isCampusManager } = useAuth();
+  const { currentUser, isAdmin, isCampusManager, isFaculty } = useAuth();
   const branches = getBranches();
 
   const userAssignedBranch = (currentUser?.branch_id || currentUser?.campus_id) as BranchId | undefined;
-  const initialBranch: BranchId | 'all' = isCampusManager && userAssignedBranch ? userAssignedBranch : 'all';
+  const initialBranch: BranchId | 'all' = !isAdmin && userAssignedBranch ? userAssignedBranch : 'all';
 
   const [selectedBranch, setSelectedBranch] = useState<BranchId | 'all'>(initialBranch);
   const [selectedTrack, setSelectedTrack] = useState<AcademicTrackId | 'all'>('all');
 
   useEffect(() => {
-    if (isCampusManager && userAssignedBranch) {
+    if (!isAdmin && userAssignedBranch) {
       setSelectedBranch(userAssignedBranch);
     }
-  }, [currentUser, isCampusManager, userAssignedBranch]);
+  }, [currentUser, isAdmin, userAssignedBranch]);
 
-  const examinations = getExaminations();
-  const subjects = getSubjects();
+  // Use scoped examinations and subjects based on authenticated user
+  const examinations = useMemo(() => {
+    if (!currentUser || isAdmin) return getExaminations();
+    return getExaminationsForUser(currentUser);
+  }, [currentUser, isAdmin]);
+
+  const subjects = useMemo(() => {
+    if (!currentUser || isAdmin) return getSubjects();
+    return getSubjectsForUser(currentUser);
+  }, [currentUser, isAdmin]);
   const topics = getTopics();
   const semesters = getSemesters();
   const allHolidays = getHolidays();
@@ -188,14 +198,14 @@ export const ExamReadinessDashboard: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Branch Filter */}
+            {/* Branch Context */}
             <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-[#FAF7F0] border border-[#EFE8DC] text-xs">
               <Building2 className="w-3.5 h-3.5 text-[#71695F]" />
               <span className="font-medium text-[#71695F]">Branch:</span>
-              {isCampusManager ? (
+              {!isAdmin ? (
                 <div className="flex items-center gap-1.5 font-semibold text-[#1C1917]">
-                  <span>{selectedBranch}</span>
-                  <Lock className="w-3 h-3 text-[#B08800]" />
+                  <span>{userAssignedBranch || (selectedBranch !== 'all' ? selectedBranch : 'Assigned Campus')}</span>
+                  {isCampusManager && <Lock className="w-3 h-3 text-[#B08800]" />}
                 </div>
               ) : (
                 <select
