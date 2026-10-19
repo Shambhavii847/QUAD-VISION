@@ -20,7 +20,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#FAF7F0] text-[#1C1917] font-sans selection:bg-[#FBE69B]/60 selection:text-[#1C1917] antialiased p-2 sm:p-3 lg:p-4 flex">
+    <div className="min-h-screen bg-ivory-100 text-[#1C1917] font-sans selection:bg-[#FBE69B]/60 selection:text-[#1C1917] antialiased p-2 sm:p-3 lg:p-4 flex">
       {/* Mobile drawer backdrop */}
       {isMobileSidebarOpen && (
         <div
