@@ -12,6 +12,7 @@ import {
   authenticateLocalUser,
   getActiveSession,
   clearActiveSession,
+  validateCampusAssignment,
 } from './authService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import {
@@ -52,6 +53,8 @@ interface AuthContextType {
   canLogSession: boolean;
   canManageAdmin: boolean;
   canEscalate: boolean;
+  campusAssignmentValid: boolean;
+  campusAssignmentError?: string;
   reSyncDatabase: () => Promise<boolean>;
 }
 
@@ -242,6 +245,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canManageAdmin = isAdmin;
   const canEscalate = isAdmin || isCampusManager;
 
+  const campusValidation = validateCampusAssignment(currentUser);
+  const campusAssignmentValid = campusValidation.valid;
+  const campusAssignmentError = !campusValidation.valid ? campusValidation.reason : undefined;
+
   return (
     <AuthContext.Provider
       value={{
@@ -263,6 +270,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canLogSession,
         canManageAdmin,
         canEscalate,
+        campusAssignmentValid,
+        campusAssignmentError,
         reSyncDatabase,
       }}
     >

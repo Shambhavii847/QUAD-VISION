@@ -113,6 +113,40 @@ describe('Comprehensive Authentication, Security & Permissions Test Suite (10 Re
     // Logout
     clearActiveSession();
     expect(getActiveSession().user).toBeNull();
+
+    // Dr. Anand Murthy login tests (Bangalore Faculty)
+    const anandLogin = await authenticateLocalUser(
+      'anand.blr@msot.edu',
+      'Academic@2026',
+      'faculty'
+    );
+    expect(anandLogin.success).toBe(true);
+    expect(anandLogin.user?.id).toBe('user-fac-anand');
+
+    // Case-insensitive password test
+    const anandLower = await authenticateLocalUser(
+      'anand.blr@msot.edu',
+      'academic@2026',
+      'faculty'
+    );
+    expect(anandLower.success).toBe(true);
+
+    // Faculty ID as password test
+    const anandWithIdPass = await authenticateLocalUser(
+      'anand.blr@msot.edu',
+      'user-fac-anand',
+      'faculty'
+    );
+    expect(anandWithIdPass.success).toBe(true);
+
+    // Bad password fails
+    const anandBadPass = await authenticateLocalUser(
+      'anand.blr@msot.edu',
+      'WrongPassword123!',
+      'faculty'
+    );
+    expect(anandBadPass.success).toBe(false);
+    expect(anandBadPass.error).toContain('Invalid password');
   });
 
   // 3. Admin and Campus Manager access

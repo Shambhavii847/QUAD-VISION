@@ -14,11 +14,15 @@ import {
   getHolidays,
   getSubjects,
   getBatches,
+  resetToDemoData,
 } from '../services/storage';
 import { detectExtraClassClashes } from '../utils/clashDetection';
 import { UserProfile, ExtraClassRequest } from '../types';
 
 describe('Extra Class Request & Approval Workflow Verification', () => {
+  beforeEach(() => {
+    resetToDemoData();
+  });
   // Mock Personas
   const facultyRadhika: UserProfile = {
     id: 'user-fac-radhika',

@@ -1039,7 +1039,7 @@ export function createExtraClassRequest(
   const subject = subjects.find((s) => s.id === input.subject_id);
   const batch = batches.find((b) => b.id === input.batch_id);
 
-  const requestId = 'ecr-' + Date.now();
+  const requestId = 'ecr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
   const nowIso = new Date().toISOString();
 
   const newRequest: ExtraClassRequest = {
@@ -1334,7 +1334,7 @@ export function reviewExtraClassRequest(
 
     // Create official calendar event
     const approvedEvent: ApprovedExtraClass = {
-      id: 'aec-' + Date.now(),
+      id: 'aec-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
       request_id: request.id,
       subject_id: request.subject_id,
       subject_name: request.subject_name || '',
