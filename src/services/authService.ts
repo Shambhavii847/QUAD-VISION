@@ -363,3 +363,47 @@ export function canUserAccessAdmin(user: UserProfile | null): boolean {
   if (!user) return false;
   return user.role === 'admin';
 }
+
+/**
+ * Validate that a user has a valid campus assignment.
+ * Students, Faculty, and Campus Managers MUST have a campus assigned.
+ * Admins may operate cross-campus and are exempt.
+ * Returns { valid: true, campusId } if assignment is present, or { valid: false, reason } otherwise.
+ */
+export function validateCampusAssignment(
+  user: UserProfile | null
+): { valid: true; campusId: CampusId | BranchId } | { valid: false; reason: string } {
+  if (!user) {
+    return { valid: false, reason: 'No authenticated user.' };
+  }
+  // Admins are exempt but we still return a campus id if present
+  if (user.role === 'admin') {
+    const campusId = (user.branch_id || user.campus_id) as CampusId | BranchId;
+    return { valid: true, campusId: campusId || ('Ghaziabad' as BranchId) };
+  }
+  const campusId = user.branch_id || user.campus_id;
+  if (!campusId) {
+    return {
+      valid: false,
+      reason:
+        'Your account does not have a campus assignment. Please contact your administrator to assign you to a campus before accessing campus-specific data.',
+    };
+  }
+  return { valid: true, campusId: campusId as CampusId | BranchId };
+}
+
+/**
+ * Enforce that a data record's campus matches the user's assigned campus.
+ * Returns true if the user is authorized to access this record's campus.
+ */
+export function enforceCampusIsolation(
+  user: UserProfile | null,
+  recordCampusId: CampusId | BranchId | undefined
+): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true; // Admins can access all campuses
+  const userCampus = user.branch_id || user.campus_id;
+  if (!userCampus) return false; // No campus assigned, deny access
+  if (!recordCampusId) return true; // Record has no campus restriction
+  return userCampus === recordCampusId;
+}
