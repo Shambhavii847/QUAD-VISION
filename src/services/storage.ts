@@ -72,6 +72,7 @@ import {
   canCampusManagerAccessCampus,
   canUserAccessAdmin,
 } from './authService';
+let storageInitialized = false;
 
 const STORAGE_KEYS = {
   BRANCHES: 'msot_branches',
@@ -159,6 +160,8 @@ function setItem<T>(key: string, val: T): void {
 
 // Initialize seed data if not present or outdated
 export function initializeStorageIfNeeded(): void {
+    if (storageInitialized) return;
+    storageInitialized = true;
   const branches = getItem<Branch[] | null>(STORAGE_KEYS.BRANCHES, null);
   const users = getItem<UserProfile[] | null>(STORAGE_KEYS.USERS, null);
   // Auto-upgrade if empty or still containing old non-branch records
