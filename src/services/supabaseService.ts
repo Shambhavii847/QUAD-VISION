@@ -99,14 +99,20 @@ export async function supabaseSignIn(
       .eq('id', data.user.id)
       .maybeSingle();
 
+    
     const profile: UserProfile = {
       id: data.user.id,
       email: data.user.email || email,
       name: profileData?.name || (data.user.user_metadata?.name as string) || email.split('@')[0],
       role: (profileData?.role as UserRole) || (data.user.user_metadata?.role as UserRole) || 'student',
       campus_id: (profileData?.campus_id as CampusId) || (data.user.user_metadata?.campus_id as CampusId),
+      branch_id: profileData?.branch_id || undefined,
+      assigned_batch_ids: profileData?.assigned_batch_ids || [],
+      assigned_subject_ids: profileData?.assigned_subject_ids || [],
+      assigned_track: profileData?.assigned_track || undefined,
       avatar_url: profileData?.avatar_url || data.user.user_metadata?.avatar_url,
     };
+
 
     return { data: { user: profile, session: data.session }, error: null };
   } catch (err: any) {
@@ -205,14 +211,20 @@ export async function supabaseGetCurrentUser(): Promise<UserProfile | null> {
       .maybeSingle();
 
     if (profile) {
+      
       return {
         id: profile.id,
         email: profile.email,
         name: profile.name,
         role: profile.role,
         campus_id: profile.campus_id,
+        branch_id: profile.branch_id,
+        assigned_batch_ids: profile.assigned_batch_ids || [],
+        assigned_subject_ids: profile.assigned_subject_ids || [],
+        assigned_track: profile.assigned_track || undefined,
         avatar_url: profile.avatar_url,
       };
+
     }
 
     return {

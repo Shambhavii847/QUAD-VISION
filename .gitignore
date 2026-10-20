@@ -54,3 +54,4 @@ coverage/
 ehthumbs.db
 Thumbs.db
 Desktop.ini
+.env.import
