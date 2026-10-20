@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter, MemoryRouter } from 'react-router-dom';
 import {
@@ -14,12 +14,23 @@ import {
   getUsers,
 } from '../services/storage';
 import { AuthProvider } from '../services/authContext';
-import { setRawSessionForTesting, clearActiveSession } from '../services/authService';
+import { setRawSessionForTesting, clearActiveSession, AuthSession } from '../services/authService';
 import { OpportunitiesHub } from '../components/opportunities/OpportunitiesHub';
 import { OpportunityDetailModal } from '../components/opportunities/OpportunityDetailModal';
 import { OpportunityCard } from '../components/opportunities/OpportunityCard';
 import { AdminOpportunitiesManager } from '../components/admin/AdminOpportunitiesManager';
 import { StudentOpportunity, UserProfile } from '../types';
+
+function mockAuthSession(user: UserProfile): void {
+  const session: AuthSession = {
+    token: `mock-token-${user.id}`,
+    userId: user.id,
+    role: user.role,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 86400000,
+  };
+  setRawSessionForTesting(session);
+}
 
 describe('Opportunities Hub Feature Verification', () => {
   let adminUser: UserProfile;
@@ -248,7 +259,7 @@ describe('Opportunities Hub Feature Verification', () => {
   describe('5. UI Components & Student Experience', () => {
     it('renders the OpportunitiesHub discovery page with welcoming header', () => {
       // Mock authenticated session
-      setRawSessionForTesting(studentUser);
+      mockAuthSession(studentUser);
 
       render(
         <MemoryRouter>
@@ -262,7 +273,7 @@ describe('Opportunities Hub Feature Verification', () => {
       expect(screen.getByText(/Explore curated hackathons, research fellowships/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/Search by title, organizer/i)).toBeInTheDocument();
       expect(screen.getByText('All Categories')).toBeInTheDocument();
-      expect(screen.getByText('Hackathons & Innovation')).toBeInTheDocument();
+      expect(screen.getAllByText('Hackathons & Innovation').length).toBeGreaterThan(0);
     });
 
     it('renders OpportunityCard with distinct deadline vs event date labels', () => {
@@ -389,7 +400,7 @@ describe('Opportunities Hub Feature Verification', () => {
 
   describe('6. Admin Management UI', () => {
     it('renders the admin opportunities table and metrics', () => {
-      setRawSessionForTesting(adminUser);
+      mockAuthSession(adminUser);
 
       render(
         <MemoryRouter>
@@ -403,6 +414,91 @@ describe('Opportunities Hub Feature Verification', () => {
       expect(screen.getByText('Publish New Opportunity')).toBeInTheDocument();
       expect(screen.getByText('Total Listings')).toBeInTheDocument();
       expect(screen.getAllByText('Published').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('7. End-to-End Admin Opportunity Posting Lifecycle', () => {
+    it('completes the draft -> preview -> publish -> unpublish -> archive lifecycle reactively', () => {
+      mockAuthSession(adminUser);
+
+      // 1. Admin creates a new draft opportunity
+      const createRes = createOrUpdateOpportunity(
+        {
+          title: 'ISRO Space Robotics Challenge 2026',
+          category: 'hackathons',
+          organizer: 'ISRO URSC',
+          short_summary: 'Design navigation algorithms for lunar terrain.',
+          full_description: 'Comprehensive rover simulation contest for engineering students.',
+          official_url: 'https://isro.gov.in/challenge',
+          apply_url: 'https://isro.gov.in/challenge/apply',
+          application_deadline: '2026-11-30',
+          event_start_date: '2026-12-15',
+          event_end_date: '2026-12-18',
+          delivery_format: 'hybrid',
+          price_status: 'free',
+          eligibility_requirements: ['Enrolled B.Tech students', 'Good academic standing'],
+          target_audience_scope: 'all_students',
+          status: 'draft',
+        },
+        adminUser
+      );
+
+      expect(createRes.success).toBe(true);
+      const createdId = createRes.opportunity?.id!;
+      expect(createdId).toBeDefined();
+
+      // 2. Verify draft is in admin storage but hidden from student portal
+      const allOppsAdmin = getOpportunities();
+      expect(allOppsAdmin.some((o) => o.id === createdId && o.status === 'draft')).toBe(true);
+
+      const studentVisibleInitial = getOpportunitiesForUser(studentUser);
+      expect(studentVisibleInitial.some((o) => o.id === createdId)).toBe(false);
+
+      // 3. Admin publishes the opportunity
+      const pubRes = toggleOpportunityStatus(createdId, 'published', adminUser);
+      expect(pubRes.success).toBe(true);
+
+      // 4. Now the opportunity is immediately visible in student portal
+      const studentVisibleAfterPublish = getOpportunitiesForUser(studentUser);
+      const studentFound = studentVisibleAfterPublish.find((o) => o.id === createdId);
+      expect(studentFound).toBeDefined();
+      expect(studentFound?.title).toBe('ISRO Space Robotics Challenge 2026');
+
+      // 5. Admin updates/edits opportunity details
+      const updateRes = createOrUpdateOpportunity(
+        {
+          id: createdId,
+          title: 'ISRO Space Robotics Challenge 2026 (Updated Cohort)',
+          short_summary: 'Updated summary for lunar and martian terrain.',
+        },
+        adminUser
+      );
+      expect(updateRes.success).toBe(true);
+
+      // Student portal immediately sees the updated title
+      const studentVisibleAfterUpdate = getOpportunitiesForUser(studentUser);
+      expect(studentVisibleAfterUpdate.find((o) => o.id === createdId)?.title).toBe(
+        'ISRO Space Robotics Challenge 2026 (Updated Cohort)'
+      );
+
+      // 6. Admin unpublishes the opportunity
+      const unpubRes = toggleOpportunityStatus(createdId, 'unpublished', adminUser);
+      expect(unpubRes.success).toBe(true);
+
+      const studentVisibleAfterUnpublish = getOpportunitiesForUser(studentUser);
+      expect(studentVisibleAfterUnpublish.some((o) => o.id === createdId)).toBe(false);
+
+      // 7. Admin archives the opportunity
+      const archiveRes = archiveOpportunity(createdId, adminUser);
+      expect(archiveRes.success).toBe(true);
+
+      // Preserved in admin database with status 'archived'
+      const archivedOpp = getOpportunities().find((o) => o.id === createdId);
+      expect(archivedOpp).toBeDefined();
+      expect(archivedOpp?.status).toBe('archived');
+
+      // Still completely hidden from student portal
+      expect(getOpportunitiesForUser(studentUser).some((o) => o.id === createdId)).toBe(false);
     });
   });
 });

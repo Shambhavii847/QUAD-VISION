@@ -13,6 +13,7 @@ import { CalendarTimetable } from './components/calendar/CalendarTimetable';
 import { ExamReadinessDashboard } from './components/exams/ExamReadinessDashboard';
 import { StudentPortal } from './components/student/StudentPortal';
 import { OpportunitiesHub } from './components/opportunities/OpportunitiesHub';
+import { AdminOpportunitiesManager } from './components/admin/AdminOpportunitiesManager';
 import { CampusManagerDashboard } from './components/campusManager/CampusManagerDashboard';
 import { AdminManagement } from './components/admin/AdminManagement';
 import { AIAssistantFloatingButton } from './components/ai/AIAssistantFloatingButton';
@@ -227,6 +228,26 @@ const AppRoutes: React.FC = () => {
             <Navigate to="/login" replace />
           )
         }
+      />
+
+      <Route
+        path="/admin/opportunities"
+        element={
+          currentUser ? (
+            <AppLayout>
+              <RequireRole allowedRoles={['admin']} requiredLabel="Manage Opportunities">
+                <AdminOpportunitiesManager />
+              </RequireRole>
+            </AppLayout>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+
+      <Route
+        path="/manage-opportunities"
+        element={<Navigate to="/admin/opportunities" replace />}
       />
 
       <Route

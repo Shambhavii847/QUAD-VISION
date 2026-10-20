@@ -14,6 +14,7 @@ import {
   X,
   LogOut,
   Sparkles,
+  Compass,
 } from 'lucide-react';
 import { getMissedSessions } from '../../services/storage';
 
@@ -70,8 +71,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
   ];
 
   const adminToolsItems = [
+    { to: '/admin/opportunities', label: 'Manage Opportunities', icon: Sparkles, visible: true },
     { to: '/student', label: 'Student Portal', icon: UserCheck, visible: true },
-    { to: '/opportunities', label: 'Opportunities Hub', icon: Sparkles, visible: true },
+    { to: '/opportunities', label: 'Student Opportunities', icon: Compass, visible: true },
     { to: '/campus-manager', label: 'Escalations', icon: Building2, badgeCount: escalatedCount > 0 ? escalatedCount : undefined, visible: true },
     { to: '/admin', label: 'Admin Console', icon: Settings, visible: true },
   ];

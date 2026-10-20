@@ -618,38 +618,80 @@ export function createOrUpdateOpportunity(
     };
   }
 
+  const allOpps = getOpportunities();
+  let existingOpp: StudentOpportunity | undefined;
+  if (oppData.id) {
+    existingOpp = allOpps.find((o) => o.id === oppData.id);
+    if (!existingOpp) {
+      return { success: false, error: 'Opportunity not found.' };
+    }
+  }
+
+  const mergedData: Partial<StudentOpportunity> = existingOpp
+    ? { ...existingOpp, ...oppData }
+    : oppData;
+
   // Required field validations
-  if (!oppData.title || oppData.title.trim() === '') {
+  if (!mergedData.title || mergedData.title.trim() === '') {
     return { success: false, error: 'Opportunity title is required.' };
   }
-  if (!oppData.category) {
+  if (!mergedData.category) {
     return { success: false, error: 'Category selection is required.' };
   }
-  const organizer = oppData.organizer || oppData.organization;
+  const organizer = mergedData.organizer || mergedData.organization;
   if (!organizer || organizer.trim() === '') {
     return { success: false, error: 'Organizer / Institution name is required.' };
   }
-  const summary = oppData.short_summary || oppData.description;
+  const summary = mergedData.short_summary || mergedData.description;
   if (!summary || summary.trim() === '') {
     return { success: false, error: 'Short summary is required.' };
   }
-  if (!oppData.official_url || oppData.official_url.trim() === '') {
+  if (!mergedData.official_url || mergedData.official_url.trim() === '') {
     return { success: false, error: 'Official verified external URL is required.' };
   }
 
   // URL security validation
-  if (!isValidOpportunityUrl(oppData.official_url)) {
+  if (!isValidOpportunityUrl(mergedData.official_url)) {
     return { success: false, error: 'Official URL must be a valid http:// or https:// web address.' };
   }
-  if (oppData.apply_url && !isValidOpportunityUrl(oppData.apply_url)) {
+  if (mergedData.apply_url && !isValidOpportunityUrl(mergedData.apply_url)) {
     return { success: false, error: 'Application URL must be a valid http:// or https:// web address.' };
   }
-  if (oppData.source_url && !isValidOpportunityUrl(oppData.source_url)) {
+  if (mergedData.source_url && !isValidOpportunityUrl(mergedData.source_url)) {
     return { success: false, error: 'Source URL must be a valid http:// or https:// web address.' };
   }
+  if (mergedData.cover_image_url && !isValidOpportunityUrl(mergedData.cover_image_url)) {
+    return { success: false, error: 'Cover image URL must be a valid http:// or https:// web address.' };
+  }
 
-  const allOpps = getOpportunities();
+  // Date range validations
+  if (mergedData.event_start_date && mergedData.event_end_date) {
+    if (mergedData.event_end_date < mergedData.event_start_date) {
+      return { success: false, error: 'Event end date cannot be earlier than event start date.' };
+    }
+  }
+  if (mergedData.publication_start_date && mergedData.publication_end_date) {
+    if (mergedData.publication_end_date < mergedData.publication_start_date) {
+      return { success: false, error: 'Publication end date cannot be earlier than publication start date.' };
+    }
+  }
+
   const nowIso = new Date().toISOString();
+
+  // Resolve target audience mappings
+  const resolvedBranches: BranchId[] = (oppData.target_campuses && oppData.target_campuses.length > 0)
+    ? (oppData.target_campuses as BranchId[])
+    : (oppData.eligible_branches && oppData.eligible_branches.length > 0)
+    ? oppData.eligible_branches
+    : ['Ghaziabad', 'Bangalore', 'Jaipur'];
+
+  const resolvedTracks: AcademicTrackId[] = (oppData.target_tracks && oppData.target_tracks.length > 0)
+    ? (oppData.target_tracks as AcademicTrackId[])
+    : (oppData.eligible_tracks || []);
+
+  const resolvedBatches: string[] = (oppData.target_batches && oppData.target_batches.length > 0)
+    ? oppData.target_batches
+    : (oppData.eligible_batch_ids || []);
 
   let savedOpp: StudentOpportunity;
 
@@ -667,18 +709,24 @@ export function createOrUpdateOpportunity(
       short_summary: summary,
       full_description: oppData.full_description || summary,
       description: oppData.full_description || summary,
+      eligible_branches: resolvedBranches,
+      target_campuses: oppData.target_campuses || allOpps[index].target_campuses,
+      eligible_tracks: resolvedTracks,
+      target_tracks: oppData.target_tracks || allOpps[index].target_tracks,
+      eligible_batch_ids: resolvedBatches,
+      target_batches: oppData.target_batches || allOpps[index].target_batches,
       updated_at: nowIso,
       updated_by_id: user.id,
       updated_by_name: user.name,
     } as StudentOpportunity;
     allOpps[index] = savedOpp;
   } else {
-    // Create new
+    // Create new (default to draft if not specified)
     const newId = `opp-${oppData.category || 'misc'}-${Date.now()}`;
     savedOpp = {
       id: newId,
       title: oppData.title.trim(),
-      slug: oppData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+      slug: oppData.slug?.trim() || oppData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
       category: oppData.category,
       type: oppData.category,
       organizer: organizer.trim(),
@@ -689,7 +737,7 @@ export function createOrUpdateOpportunity(
       official_url: oppData.official_url.trim(),
       apply_url: oppData.apply_url?.trim() || oppData.official_url.trim(),
       source_url: oppData.source_url?.trim(),
-      last_verified_at: nowIso,
+      last_verified_at: oppData.last_verified_at || nowIso.split('T')[0],
       application_deadline: oppData.application_deadline || oppData.deadline,
       deadline: oppData.application_deadline || oppData.deadline,
       event_start_date: oppData.event_start_date,
@@ -699,15 +747,21 @@ export function createOrUpdateOpportunity(
       delivery_format: oppData.delivery_format || 'online',
       price_status: oppData.price_status || 'free',
       stipend_or_reward: oppData.stipend_or_reward,
+      eligibility: oppData.eligibility,
       eligibility_requirements: oppData.eligibility_requirements || ['Open to undergraduate students'],
       requirements: oppData.eligibility_requirements || ['Open to undergraduate students'],
-      eligibility_summary: oppData.eligibility_summary || 'Undergraduate students',
+      eligibility_summary: oppData.eligibility || oppData.eligibility_summary || 'Undergraduate students',
       target_audience_scope: oppData.target_audience_scope || 'all_students',
-      eligible_branches: oppData.eligible_branches || ['Ghaziabad', 'Bangalore', 'Jaipur'],
+      eligible_branches: resolvedBranches,
+      target_campuses: oppData.target_campuses || resolvedBranches,
+      eligible_tracks: resolvedTracks,
+      target_tracks: oppData.target_tracks || resolvedTracks,
+      eligible_batch_ids: resolvedBatches,
+      target_batches: oppData.target_batches || resolvedBatches,
       location: oppData.location || 'Remote / Hybrid',
       cover_image_url: oppData.cover_image_url,
       featured: Boolean(oppData.featured),
-      status: oppData.status || 'published',
+      status: oppData.status || 'draft',
       created_by_id: user.id,
       created_by_name: user.name,
       created_at: nowIso,
@@ -722,7 +776,7 @@ export function createOrUpdateOpportunity(
     'opportunity',
     savedOpp.id,
     oppData.id ? 'update' : 'create',
-    `${user.name} ${oppData.id ? 'updated' : 'published'} Opportunity: "${savedOpp.title}" (${savedOpp.category})`,
+    `${user.name} ${oppData.id ? 'updated' : (savedOpp.status === 'published' ? 'published' : 'saved draft for')} Opportunity: "${savedOpp.title}" (${savedOpp.category})`,
     user
   );
 

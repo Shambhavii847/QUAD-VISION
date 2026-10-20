@@ -106,7 +106,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
   }>({
     title: '',
     slug: '',
-    category: 'hackathons_innovation',
+    category: 'hackathons',
     organizer: '',
     short_summary: '',
     full_description: '',
@@ -130,7 +130,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
     location: '',
     cover_image_url: '',
     featured: false,
-    status: 'published',
+    status: 'draft',
   });
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -143,7 +143,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
     setFormData({
       title: '',
       slug: '',
-      category: 'hackathons_innovation',
+      category: 'hackathons',
       organizer: '',
       short_summary: '',
       full_description: '',
@@ -167,7 +167,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
       location: '',
       cover_image_url: '',
       featured: false,
-      status: 'published',
+      status: 'draft',
     });
     setFormErrors({});
     setIsEditorOpen(true);
@@ -193,12 +193,12 @@ export const AdminOpportunitiesManager: React.FC = () => {
       publication_end_date: opp.publication_end_date || '',
       delivery_format: opp.delivery_format || 'online',
       price_status: opp.price_status || 'free',
-      eligibility: opp.eligibility || '',
-      eligibility_requirements: (opp.eligibility_requirements || []).join('\n'),
+      eligibility: opp.eligibility || opp.eligibility_summary || '',
+      eligibility_requirements: (opp.eligibility_requirements || opp.requirements || []).join('\n'),
       target_audience_scope: opp.target_audience_scope || 'all_students',
-      target_campuses: opp.target_campuses || [],
-      target_tracks: opp.target_tracks || [],
-      target_batches: opp.target_batches || [],
+      target_campuses: opp.target_campuses || (opp.eligible_branches as string[]) || [],
+      target_tracks: opp.target_tracks || (opp.eligible_tracks as string[]) || [],
+      target_batches: opp.target_batches || opp.eligible_batch_ids || [],
       location: opp.location || '',
       cover_image_url: opp.cover_image_url || '',
       featured: Boolean(opp.featured),
@@ -208,9 +208,58 @@ export const AdminOpportunitiesManager: React.FC = () => {
     setIsEditorOpen(true);
   };
 
+  const handleLivePreview = () => {
+    const previewObj: StudentOpportunity = {
+      id: editingId || 'preview-draft',
+      title: formData.title.trim() || 'Untitled Opportunity (Preview)',
+      slug: formData.slug.trim() || 'preview',
+      category: formData.category,
+      organizer: formData.organizer.trim() || 'Organizer / Institution Name',
+      short_summary: formData.short_summary.trim() || 'Short synopsis will appear here.',
+      full_description: formData.full_description.trim() || 'Full description will appear here.',
+      official_url: formData.official_url.trim() || 'https://example.org',
+      apply_url: formData.apply_url.trim() || formData.official_url.trim() || 'https://example.org/apply',
+      source_url: formData.source_url.trim() || undefined,
+      last_verified_at: formData.last_verified_at || new Date().toISOString().split('T')[0],
+      application_deadline: formData.application_deadline.trim() || undefined,
+      event_start_date: formData.event_start_date.trim() || undefined,
+      event_end_date: formData.event_end_date.trim() || undefined,
+      publication_start_date: formData.publication_start_date.trim() || undefined,
+      publication_end_date: formData.publication_end_date.trim() || undefined,
+      delivery_format: formData.delivery_format,
+      price_status: formData.price_status,
+      eligibility: formData.eligibility.trim() || undefined,
+      eligibility_requirements: formData.eligibility_requirements
+        .split('\n')
+        .map((r) => r.trim())
+        .filter((r) => r.length > 0),
+      target_audience_scope: formData.target_audience_scope,
+      target_campuses: formData.target_campuses,
+      target_tracks: formData.target_tracks,
+      target_batches: formData.target_batches,
+      eligible_branches: (formData.target_campuses.length > 0 ? (formData.target_campuses as any) : ['Ghaziabad', 'Bangalore', 'Jaipur']),
+      location: formData.location.trim() || undefined,
+      cover_image_url: formData.cover_image_url.trim() || undefined,
+      featured: formData.featured,
+      status: formData.status,
+      created_at: new Date().toISOString(),
+    };
+    setPreviewOpportunity(previewObj);
+  };
+
   const handleToggleStatus = (oppId: string, newStatus: OpportunityPublicationStatus) => {
+    if (newStatus === 'archived' && !window.confirm('Are you sure you want to archive this opportunity? It will be hidden from students, preserving administrative records.')) {
+      return;
+    }
+    if (newStatus === 'unpublished' && !window.confirm('Are you sure you want to unpublish this opportunity? Students will immediately no longer see it.')) {
+      return;
+    }
     try {
-      toggleOpportunityStatus(oppId, newStatus, currentUser);
+      const res = toggleOpportunityStatus(oppId, newStatus, currentUser);
+      if (!res.success) {
+        showNotice('error', res.error || 'Failed to update status');
+        return;
+      }
       refreshList();
       showNotice('success', `Status updated to ${newStatus}`);
     } catch (err: any) {
@@ -259,6 +308,15 @@ export const AdminOpportunitiesManager: React.FC = () => {
     if (formData.source_url.trim() && !isValidOpportunityUrl(formData.source_url.trim())) {
       errors.source_url = 'Source URL must be a valid http:// or https:// URL';
     }
+    if (formData.cover_image_url.trim() && !isValidOpportunityUrl(formData.cover_image_url.trim())) {
+      errors.cover_image_url = 'Cover image URL must be a valid http:// or https:// URL';
+    }
+    if (formData.event_start_date && formData.event_end_date && formData.event_end_date < formData.event_start_date) {
+      errors.event_end_date = 'Event end date cannot be earlier than event start date';
+    }
+    if (formData.publication_start_date && formData.publication_end_date && formData.publication_end_date < formData.publication_start_date) {
+      errors.publication_end_date = 'Publication end date cannot be earlier than publication start date';
+    }
 
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
@@ -303,10 +361,19 @@ export const AdminOpportunitiesManager: React.FC = () => {
         status: asStatus || formData.status,
       };
 
-      createOrUpdateOpportunity(payload, currentUser);
+      const saveRes = createOrUpdateOpportunity(payload, currentUser);
+      if (!saveRes.success) {
+        showNotice('error', saveRes.error || 'Failed to save opportunity');
+        return;
+      }
       refreshList();
       setIsEditorOpen(false);
-      showNotice('success', editingId ? 'Opportunity updated successfully' : 'Opportunity created successfully');
+      showNotice(
+        'success',
+        editingId
+          ? 'Opportunity updated successfully'
+          : (asStatus === 'published' ? 'Opportunity published successfully to student portal!' : 'Opportunity saved as draft')
+      );
     } catch (err: any) {
       showNotice('error', err.message || 'Failed to save opportunity');
     }
@@ -314,9 +381,15 @@ export const AdminOpportunitiesManager: React.FC = () => {
 
   // Filtered administrative list
   const filteredList = useMemo(() => {
+    const now = new Date();
     return opportunities.filter((opp) => {
       if (filterCategory !== 'all' && opp.category !== filterCategory) return false;
-      if (filterStatus !== 'all' && opp.status !== filterStatus) return false;
+      if (filterStatus === 'expired') {
+        if (!opp.application_deadline) return false;
+        return new Date(opp.application_deadline).getTime() < now.getTime();
+      } else if (filterStatus !== 'all' && opp.status !== filterStatus) {
+        return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchTitle = opp.title.toLowerCase().includes(q);
@@ -330,6 +403,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
 
   // Statistics
   const stats = useMemo(() => {
+    const now = new Date();
     return {
       total: opportunities.length,
       published: opportunities.filter((o) => o.status === 'published').length,
@@ -337,6 +411,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
       scheduled: opportunities.filter((o) => o.status === 'scheduled').length,
       archived: opportunities.filter((o) => o.status === 'archived').length,
       featured: opportunities.filter((o) => o.featured).length,
+      expired: opportunities.filter((o) => o.application_deadline && new Date(o.application_deadline).getTime() < now.getTime()).length,
     };
   }, [opportunities]);
 
@@ -465,6 +540,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
               <option value="scheduled">Scheduled</option>
               <option value="unpublished">Unpublished</option>
               <option value="archived">Archived</option>
+              <option value="expired">Expired Deadlines</option>
             </select>
           </div>
         </div>
@@ -888,9 +964,121 @@ export const AdminOpportunitiesManager: React.FC = () => {
                     onChange={() => setFormData({ ...formData, target_audience_scope: 'targeted' })}
                     className="text-[#1C1917] focus:ring-[#C4841D]"
                   />
-                  <span>Targeted (Specific campuses / tracks)</span>
+                  <span>Targeted (Specific campuses / tracks / batches)</span>
                 </label>
               </div>
+
+              {/* Targeted Audience Controls */}
+              {formData.target_audience_scope === 'targeted' && (
+                <div className="mt-3 p-3.5 rounded-2xl bg-[#FAF7F0] border border-[#EFE8DC] space-y-3">
+                  {/* Campuses */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71695F] mb-1.5">
+                      Eligible Campuses
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Ghaziabad', 'Bangalore', 'Jaipur'].map((campusName) => {
+                        const checked = formData.target_campuses.includes(campusName);
+                        return (
+                          <label
+                            key={campusName}
+                            className={`px-3 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-all flex items-center gap-1.5 ${
+                              checked
+                                ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                                : 'bg-white text-[#71695F] border-[#EFE8DC] hover:text-[#1C1917]'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...formData.target_campuses, campusName]
+                                  : formData.target_campuses.filter((c) => c !== campusName);
+                                setFormData({ ...formData, target_campuses: next });
+                              }}
+                            />
+                            <span>{campusName} Campus</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Tracks */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71695F] mb-1.5">
+                      Academic Tracks
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Mirai Track', 'University Track'].map((trackName) => {
+                        const checked = formData.target_tracks.includes(trackName);
+                        return (
+                          <label
+                            key={trackName}
+                            className={`px-3 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-all flex items-center gap-1.5 ${
+                              checked
+                                ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                                : 'bg-white text-[#71695F] border-[#EFE8DC] hover:text-[#1C1917]'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...formData.target_tracks, trackName]
+                                  : formData.target_tracks.filter((t) => t !== trackName);
+                                setFormData({ ...formData, target_tracks: next });
+                              }}
+                            />
+                            <span>{trackName}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Batches */}
+                  {batches.length > 0 && (
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71695F] mb-1.5">
+                        Target Batches
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {batches.map((b) => {
+                          const checked = formData.target_batches.includes(b.id);
+                          return (
+                            <label
+                              key={b.id}
+                              className={`px-3 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-all flex items-center gap-1.5 ${
+                                checked
+                                  ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                                  : 'bg-white text-[#71695F] border-[#EFE8DC] hover:text-[#1C1917]'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="hidden"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...formData.target_batches, b.id]
+                                    : formData.target_batches.filter((id) => id !== b.id);
+                                  setFormData({ ...formData, target_batches: next });
+                                }}
+                              />
+                              <span>{b.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -903,7 +1091,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-[#1C1917] mb-1">
-                  Official Event / Program Website
+                  Official Event / Program Website <span className="text-[#A62639]">*</span>
                 </label>
                 <input
                   type="url"
@@ -938,10 +1126,10 @@ export const AdminOpportunitiesManager: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-[#1C1917] mb-1">
-                  Source / Verification Reference URL
+                  Source Reference URL
                 </label>
                 <input
                   type="url"
@@ -954,6 +1142,24 @@ export const AdminOpportunitiesManager: React.FC = () => {
                 />
                 {formErrors.source_url && (
                   <p className="text-[11px] text-[#A62639] mt-0.5">{formErrors.source_url}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#1C1917] mb-1">
+                  Optional Cover Image URL
+                </label>
+                <input
+                  type="url"
+                  value={formData.cover_image_url}
+                  onChange={(e) => setFormData({ ...formData, cover_image_url: e.target.value })}
+                  placeholder="https://images.unsplash.com/..."
+                  className={`w-full px-3.5 py-2 rounded-xl bg-[#FAF7F0] border text-xs text-[#1C1917] focus:outline-none focus:bg-white ${
+                    formErrors.cover_image_url ? 'border-[#A62639]' : 'border-[#EFE8DC] focus:border-[#C4841D]'
+                  }`}
+                />
+                {formErrors.cover_image_url && (
+                  <p className="text-[11px] text-[#A62639] mt-0.5">{formErrors.cover_image_url}</p>
                 )}
               </div>
 
@@ -987,9 +1193,9 @@ export const AdminOpportunitiesManager: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, status: e.target.value as OpportunityPublicationStatus })}
                   className="px-3.5 py-2 rounded-xl bg-[#FAF7F0] border border-[#EFE8DC] text-xs font-medium text-[#1C1917] focus:outline-none cursor-pointer"
                 >
-                  <option value="published">Published (Visible to students immediately)</option>
                   <option value="draft">Draft (Private admin preview only)</option>
-                  <option value="scheduled">Scheduled</option>
+                  <option value="published">Published (Visible to eligible students)</option>
+                  <option value="scheduled">Scheduled (Activates on publication date)</option>
                   <option value="unpublished">Unpublished</option>
                   <option value="archived">Archived</option>
                 </select>
@@ -1014,13 +1220,25 @@ export const AdminOpportunitiesManager: React.FC = () => {
 
           {/* Form Actions */}
           <div className="pt-4 border-t border-[#EFE8DC] flex flex-col sm:flex-row items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setIsEditorOpen(false)}
-              className="px-4 py-2 rounded-full bg-[#FAF7F0] hover:bg-white text-[#71695F] hover:text-[#1C1917] border border-[#EFE8DC] text-xs font-semibold cursor-pointer transition-colors"
-            >
-              Cancel
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditorOpen(false)}
+                className="px-4 py-2 rounded-full bg-[#FAF7F0] hover:bg-white text-[#71695F] hover:text-[#1C1917] border border-[#EFE8DC] text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLivePreview}
+                className="px-4 py-2 rounded-full bg-[#FAF7F0] hover:bg-[#F3EFE6] text-[#1C1917] border border-[#EFE8DC] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Preview how this opportunity appears on student discovery card & modal"
+              >
+                <Eye className="w-3.5 h-3.5 text-[#C4841D]" />
+                <span>Preview Student View</span>
+              </button>
+            </div>
 
             <div className="flex items-center gap-2.5">
               <button
@@ -1036,7 +1254,7 @@ export const AdminOpportunitiesManager: React.FC = () => {
                 onClick={() => handleSaveOpportunity('published')}
                 className="px-5 py-2 rounded-full bg-[#1C1917] hover:bg-[#292524] text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
               >
-                {editingId ? 'Update & Publish' : 'Publish Opportunity'}
+                {editingId ? 'Update & Save' : 'Publish Opportunity'}
               </button>
             </div>
           </div>

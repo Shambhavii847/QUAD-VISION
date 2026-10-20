@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../services/authContext';
-import { getOpportunitiesForUser } from '../../services/storage';
+import { getOpportunitiesForUser, subscribeToDataChanges } from '../../services/storage';
 import {
   StudentOpportunity,
   OpportunityCategory,
@@ -22,15 +23,24 @@ import {
   BookOpen,
   CheckCircle2,
   RefreshCw,
+  Plus,
 } from 'lucide-react';
 
 export const OpportunitiesHub: React.FC = () => {
   const { currentUser } = useAuth();
+  const [storageVersion, setStorageVersion] = useState(0);
+
+  // Subscribe to storage changes for instant cross-tab and admin update reactivity
+  useEffect(() => {
+    return subscribeToDataChanges(() => {
+      setStorageVersion((v) => v + 1);
+    });
+  }, []);
 
   // Load audience-filtered opportunities for this user
   const opportunities = useMemo(() => {
     return getOpportunitiesForUser(currentUser);
-  }, [currentUser]);
+  }, [currentUser, storageVersion]);
 
   // Search & Filtering state
   const [searchQuery, setSearchQuery] = useState('');
@@ -154,6 +164,24 @@ export const OpportunitiesHub: React.FC = () => {
 
   return (
     <div className="space-y-7 pb-10">
+      {/* Admin Action Bar (Only visible to authorized Admins) */}
+      {currentUser?.role === 'admin' && (
+        <div className="bg-[#1C1917] text-white p-4 sm:px-6 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md border border-white/10">
+          <div className="flex items-center gap-2.5 text-xs">
+            <span className="w-2 h-2 rounded-full bg-[#4ADE80] animate-pulse shrink-0" />
+            <span className="font-bold text-[#FDFBF7]">Central Administrator Mode:</span>
+            <span className="text-[#A8A29E]">You have posting and management privileges.</span>
+          </div>
+          <Link
+            to="/admin/opportunities"
+            className="px-4 py-2 rounded-full bg-white hover:bg-[#FAF7F0] text-[#1C1917] text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all whitespace-nowrap cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#C4841D]" />
+            <span>Manage & Post Opportunities</span>
+          </Link>
+        </div>
+      )}
+
       {/* Editorial Welcoming Hero Header */}
       <div className="relative overflow-hidden bg-gradient-to-br from-white via-[#FAF7F0] to-[#F7EFE1] rounded-[32px] p-6 sm:p-8 lg:p-10 border border-[#EFE8DC] shadow-xs">
         <div className="relative z-10 max-w-3xl">
